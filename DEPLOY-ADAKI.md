@@ -69,13 +69,44 @@ solas. La segunda migración deja el estado correcto aunque la primera haya pues
 - Elegir ventana de bajo tráfico: reconectar 40 sesiones genera un pico de CPU y
   de conexiones a Postgres.
 
-### 2. Desplegar
+### 2. Desplegar (Evolution instalado como Service de Coolify)
 
-- Apuntar el deploy a `Anchorquery/evolution-api-adaki`, rama `main`.
-- Build de la imagen y reinicio de contenedores.
-- Si producción está shardeada en 2-3 contenedores (ver
-  `estrategia-evolution-api-40-cuentas.md`), desplegar **de a uno**, confirmando que
-  las instancias del primero reconectan antes de seguir con el siguiente.
+Producción corre como **Service** de Coolify, o sea a partir de una imagen ya
+construida (`atendai/evolution-api` o `evoapicloud/evolution-api`), no compilando
+desde un repo. Por eso el cambio es **solo de imagen**: se reemplaza la del
+contenedor de la aplicación y nada más.
+
+**Los datos no están en juego.** Postgres y Redis son contenedores aparte, con sus
+propios volúmenes, y no se tocan. Cambiar la imagen de la app no borra volúmenes:
+Coolify recrea el contenedor de la aplicación y vuelve a montar los mismos. Las
+sesiones de WhatsApp viven en Postgres/Redis, así que sobreviven; las instancias se
+reconectan solas al levantar.
+
+Pasos:
+
+1. Esperar a que el workflow `Publish Adaki image to GHCR` termine en verde. Deja la
+   imagen en `ghcr.io/anchorquery/evolution-api-adaki:latest` (y un tag por commit,
+   `:sha-<commit>`, útil para fijar una versión exacta).
+2. El paquete de GHCR nace **privado**. Dos opciones:
+   - Hacerlo público desde la página del paquete en GitHub (Package settings →
+     Change visibility). Es lo más simple; el código no viaja en la imagen fuente
+     pero sí el compilado, así que conviene decidirlo a conciencia.
+   - Mantenerlo privado y cargar en Coolify un registro privado
+     (Settings → Docker Registries) con un Personal Access Token con scope
+     `read:packages`.
+3. En Coolify, en el Service de Evolution: cambiar la imagen del contenedor de la
+   aplicación a `ghcr.io/anchorquery/evolution-api-adaki:latest`. **No tocar** los
+   contenedores de Postgres ni de Redis, ni sus volúmenes, ni las variables de
+   entorno de conexión a la base.
+4. Redeploy. Al arrancar corre `db:deploy`, que aplica las dos migraciones.
+5. Si producción está shardeada en varios contenedores (ver
+   `estrategia-evolution-api-40-cuentas.md`), hacerlo **de a uno**, confirmando que
+   las instancias del primero reconectan antes de seguir.
+
+Si en vez de eso se prefiere que Coolify compile desde el repo, hay que crear una
+**Application** apuntando a `Anchorquery/evolution-api-adaki` y reapuntarla a la
+misma base y el mismo dominio. Funciona, pero es más movimiento para el mismo
+resultado y hay más superficie donde equivocarse con las variables de entorno.
 
 ### 3. Verificar que nada se rompió
 
