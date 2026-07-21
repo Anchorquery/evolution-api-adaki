@@ -334,6 +334,7 @@ class ChatwootImport {
       const providerData: ChatwootDto = {
         ...provider,
         ignoreJids: Array.isArray(provider.ignoreJids) ? provider.ignoreJids.map((event) => String(event)) : [],
+        allowedJids: Array.isArray(provider.allowedJids) ? provider.allowedJids.map((event) => String(event)) : [],
       };
 
       this.importHistoryContacts(instance, providerData);

@@ -19,6 +19,7 @@ export class ChatwootDto {
   organization?: string;
   logo?: string;
   ignoreJids?: string[];
+  allowedJids?: string[];
 }
 
 export function ChatwootInstanceMixin<TBase extends Constructor>(Base: TBase) {

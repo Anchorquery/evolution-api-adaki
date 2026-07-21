@@ -1963,6 +1963,24 @@ export class ChatwootService {
         return null;
       }
 
+      if (this.provider?.allowedJids && this.provider.allowedJids.length > 0) {
+        const allowedJids: string[] = this.provider.allowedJids;
+        const remoteJid = body?.key?.remoteJid;
+        const normalized = this.normalizeJidIdentifier(remoteJid);
+        const isGroup = remoteJid?.endsWith('@g.us');
+        const isContact = remoteJid?.endsWith('@s.whatsapp.net');
+
+        const allowed =
+          allowedJids.includes(normalized) ||
+          (isGroup && allowedJids.includes('@g.us')) ||
+          (isContact && allowedJids.includes('@s.whatsapp.net'));
+
+        if (!allowed) {
+          this.logger.warn('Blocking message from non-whitelisted jid: ' + remoteJid);
+          return;
+        }
+      }
+
       if (this.provider?.ignoreJids && this.provider?.ignoreJids.length > 0) {
         const ignoreJids: any = this.provider?.ignoreJids;
 

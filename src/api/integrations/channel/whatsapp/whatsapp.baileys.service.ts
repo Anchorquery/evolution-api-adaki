@@ -663,7 +663,7 @@ export class BaileysStartupService extends ChannelStartupService {
 
         const isGroupJid = this.localSettings.groupsIgnore && isJidGroup(jid);
         const isBroadcast = !this.localSettings.readStatus && isJidBroadcast(jid);
-        const isNewsletter = isJidNewsletter(jid);
+        const isNewsletter = this.localSettings.newsletterIgnore && isJidNewsletter(jid);
 
         return isGroupJid || isBroadcast || isNewsletter;
       },
@@ -4478,6 +4478,51 @@ export class BaileysStartupService extends ChannelStartupService {
     }
 
     return groups;
+  }
+
+  public async fetchAllNewsletters() {
+    const chats = await this.prismaRepository.chat.findMany({
+      where: {
+        instanceId: this.instanceId,
+        remoteJid: { endsWith: '@newsletter' },
+      },
+    });
+
+    const newsletters = [];
+    for (const chat of chats) {
+      try {
+        const metadata = await this.client.newsletterMetadata('jid', chat.remoteJid);
+        newsletters.push({
+          id: chat.remoteJid,
+          name: metadata?.name ?? chat.name,
+          description: metadata?.description,
+          pictureUrl: metadata?.picture?.directPath,
+        });
+      } catch (error) {
+        this.logger.warn(`Could not fetch newsletter metadata for ${chat.remoteJid}: ${error}`);
+        newsletters.push({ id: chat.remoteJid, name: chat.name });
+      }
+    }
+
+    return newsletters;
+  }
+
+  public async followNewsletter(data: { inviteCode: string; follow?: boolean }) {
+    const metadata = await this.client.newsletterMetadata('invite', data.inviteCode);
+
+    if (!metadata?.id) {
+      throw new NotFoundException('Newsletter not found for this invite code');
+    }
+
+    if (data.follow !== false) {
+      await this.client.newsletterFollow(metadata.id);
+    }
+
+    return {
+      id: metadata.id,
+      name: metadata.name,
+      description: metadata.description,
+    };
   }
 
   public async inviteCode(id: GroupJid) {

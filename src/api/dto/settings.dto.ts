@@ -6,5 +6,6 @@ export class SettingsDto {
   readMessages?: boolean;
   readStatus?: boolean;
   syncFullHistory?: boolean;
+  newsletterIgnore?: boolean;
   wavoipToken?: string;
 }
