@@ -1963,20 +1963,31 @@ export class ChatwootService {
         return null;
       }
 
-      if (this.provider?.allowedJids && this.provider.allowedJids.length > 0) {
-        const allowedJids: string[] = this.provider.allowedJids;
-        const remoteJid = body?.key?.remoteJid;
-        const normalized = this.normalizeJidIdentifier(remoteJid);
-        const isGroup = remoteJid?.endsWith('@g.us');
-        const isContact = remoteJid?.endsWith('@s.whatsapp.net');
+      // Whitelist de privacidad: solo se aplica a eventos que traen un remoteJid
+      // (mensajes). Eventos de infraestructura como QRCODE_UPDATED,
+      // STATUS_INSTANCE o CONNECTION_UPDATE llegan sin `key`, y filtrarlos
+      // dejaría la instancia sin forma de reconectarse desde Chatwoot.
+      const allowedJids: string[] = this.provider?.allowedJids ?? [];
+      const remoteJidForFilter = body?.key?.remoteJid;
+
+      if (allowedJids.length > 0 && remoteJidForFilter && remoteJidForFilter !== 'status@broadcast') {
+        const normalized = this.normalizeJidIdentifier(remoteJidForFilter);
+        const isGroup = remoteJidForFilter.endsWith('@g.us');
+        const isNewsletter = remoteJidForFilter.endsWith('@newsletter');
+        const isContact = remoteJidForFilter.endsWith('@s.whatsapp.net') || remoteJidForFilter.endsWith('@lid');
 
         const allowed =
           allowedJids.includes(normalized) ||
+          // Para @lid normalizeJidIdentifier devuelve el JID completo, así que
+          // el número pelado (formato en el que se guardan las whitelists) hay
+          // que compararlo aparte.
+          allowedJids.includes(remoteJidForFilter.split('@')[0].replace(/:\d+/, '')) ||
           (isGroup && allowedJids.includes('@g.us')) ||
+          (isNewsletter && allowedJids.includes('@newsletter')) ||
           (isContact && allowedJids.includes('@s.whatsapp.net'));
 
         if (!allowed) {
-          this.logger.warn('Blocking message from non-whitelisted jid: ' + remoteJid);
+          this.logger.warn('Blocking message from non-whitelisted jid: ' + remoteJidForFilter);
           return;
         }
       }

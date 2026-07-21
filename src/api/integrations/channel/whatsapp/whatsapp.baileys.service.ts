@@ -4480,6 +4480,12 @@ export class BaileysStartupService extends ChannelStartupService {
     return groups;
   }
 
+  // Límite de metadatos a consultar por request: cada uno es un round-trip a
+  // WhatsApp, así que sin tope una cuenta con muchos canales dejaría el request
+  // HTTP colgado varios segundos. Los que exceden el tope salen con el nombre
+  // que ya tiene el chat guardado.
+  private readonly NEWSLETTER_METADATA_LIMIT = 30;
+
   public async fetchAllNewsletters() {
     const chats = await this.prismaRepository.chat.findMany({
       where: {
@@ -4489,7 +4495,14 @@ export class BaileysStartupService extends ChannelStartupService {
     });
 
     const newsletters = [];
-    for (const chat of chats) {
+    for (const [index, chat] of chats.entries()) {
+      const fallback = { id: chat.remoteJid, name: chat.name };
+
+      if (!this.client || index >= this.NEWSLETTER_METADATA_LIMIT) {
+        newsletters.push(fallback);
+        continue;
+      }
+
       try {
         const metadata = await this.client.newsletterMetadata('jid', chat.remoteJid);
         newsletters.push({
@@ -4500,15 +4513,28 @@ export class BaileysStartupService extends ChannelStartupService {
         });
       } catch (error) {
         this.logger.warn(`Could not fetch newsletter metadata for ${chat.remoteJid}: ${error}`);
-        newsletters.push({ id: chat.remoteJid, name: chat.name });
+        newsletters.push(fallback);
       }
     }
 
     return newsletters;
   }
 
+  // WhatsApp copia el link completo ("https://whatsapp.com/channel/0029Xxxx"),
+  // pero Baileys espera solo el código, así que aceptamos ambos.
+  private extractNewsletterInviteCode(input: string) {
+    const trimmed = (input ?? '').trim();
+    const fromUrl = trimmed.match(/channel\/([A-Za-z0-9_-]+)/);
+    return fromUrl ? fromUrl[1] : trimmed;
+  }
+
   public async followNewsletter(data: { inviteCode: string; follow?: boolean }) {
-    const metadata = await this.client.newsletterMetadata('invite', data.inviteCode);
+    if (!this.client) {
+      throw new BadRequestException('Instance is not connected');
+    }
+
+    const inviteCode = this.extractNewsletterInviteCode(data.inviteCode);
+    const metadata = await this.client.newsletterMetadata('invite', inviteCode);
 
     if (!metadata?.id) {
       throw new NotFoundException('Newsletter not found for this invite code');

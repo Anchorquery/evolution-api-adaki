@@ -35,7 +35,11 @@ export class ChannelStartupService {
   public readonly instance: wa.Instance = {};
   public readonly localChatwoot: wa.LocalChatwoot = {};
   public readonly localProxy: wa.LocalProxy = {};
-  public readonly localSettings: wa.LocalSettings = {};
+  // newsletterIgnore arranca en true a propósito: loadSettings() es asíncrono y
+  // shouldIgnoreJid puede consultarse antes de que resuelva. Sin este default,
+  // durante esa ventana (justo cuando llega el history sync) los canales se
+  // colarían aunque la instancia los tenga desactivados.
+  public readonly localSettings: wa.LocalSettings = { newsletterIgnore: true };
   public readonly localWebhook: wa.LocalWebHook = {};
 
   public chatwootService = new ChatwootService(
@@ -171,7 +175,7 @@ export class ChannelStartupService {
         readMessages: data.readMessages,
         readStatus: data.readStatus,
         syncFullHistory: data.syncFullHistory,
-        newsletterIgnore: data.newsletterIgnore ?? true,
+        newsletterIgnore: data.newsletterIgnore ?? this.localSettings.newsletterIgnore ?? true,
         wavoipToken: data.wavoipToken,
       },
       create: {
@@ -182,7 +186,7 @@ export class ChannelStartupService {
         readMessages: data.readMessages,
         readStatus: data.readStatus,
         syncFullHistory: data.syncFullHistory,
-        newsletterIgnore: data.newsletterIgnore ?? true,
+        newsletterIgnore: data.newsletterIgnore ?? this.localSettings.newsletterIgnore ?? true,
         wavoipToken: data.wavoipToken,
         instanceId: this.instanceId,
       },
@@ -195,7 +199,7 @@ export class ChannelStartupService {
     this.localSettings.readMessages = data?.readMessages;
     this.localSettings.readStatus = data?.readStatus;
     this.localSettings.syncFullHistory = data?.syncFullHistory;
-    this.localSettings.newsletterIgnore = data?.newsletterIgnore ?? true;
+    this.localSettings.newsletterIgnore = data?.newsletterIgnore ?? this.localSettings.newsletterIgnore ?? true;
     this.localSettings.wavoipToken = data?.wavoipToken;
 
     if (this.localSettings.wavoipToken && this.localSettings.wavoipToken.length > 0) {
@@ -223,6 +227,7 @@ export class ChannelStartupService {
       readMessages: data.readMessages,
       readStatus: data.readStatus,
       syncFullHistory: data.syncFullHistory,
+      newsletterIgnore: data.newsletterIgnore,
       wavoipToken: data.wavoipToken,
     };
   }
