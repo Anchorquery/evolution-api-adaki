@@ -130,6 +130,7 @@ export class InstanceController {
         readMessages: instanceData.readMessages === true,
         readStatus: instanceData.readStatus === true,
         syncFullHistory: instanceData.syncFullHistory === true,
+        newsletterIgnore: instanceData.newsletterIgnore !== false,
         wavoipToken: instanceData.wavoipToken || '',
       };
 

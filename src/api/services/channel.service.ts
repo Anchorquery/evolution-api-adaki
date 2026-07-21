@@ -153,6 +153,8 @@ export class ChannelStartupService {
     this.localSettings.readMessages = data?.readMessages;
     this.localSettings.readStatus = data?.readStatus;
     this.localSettings.syncFullHistory = data?.syncFullHistory;
+    // Sin fila de settings, los canales se ignoran (comportamiento histórico).
+    this.localSettings.newsletterIgnore = data?.newsletterIgnore ?? true;
     this.localSettings.wavoipToken = data?.wavoipToken;
   }
 
@@ -169,6 +171,7 @@ export class ChannelStartupService {
         readMessages: data.readMessages,
         readStatus: data.readStatus,
         syncFullHistory: data.syncFullHistory,
+        newsletterIgnore: data.newsletterIgnore ?? true,
         wavoipToken: data.wavoipToken,
       },
       create: {
@@ -179,6 +182,7 @@ export class ChannelStartupService {
         readMessages: data.readMessages,
         readStatus: data.readStatus,
         syncFullHistory: data.syncFullHistory,
+        newsletterIgnore: data.newsletterIgnore ?? true,
         wavoipToken: data.wavoipToken,
         instanceId: this.instanceId,
       },
@@ -191,6 +195,7 @@ export class ChannelStartupService {
     this.localSettings.readMessages = data?.readMessages;
     this.localSettings.readStatus = data?.readStatus;
     this.localSettings.syncFullHistory = data?.syncFullHistory;
+    this.localSettings.newsletterIgnore = data?.newsletterIgnore ?? true;
     this.localSettings.wavoipToken = data?.wavoipToken;
 
     if (this.localSettings.wavoipToken && this.localSettings.wavoipToken.length > 0) {
