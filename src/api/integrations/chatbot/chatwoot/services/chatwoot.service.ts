@@ -935,9 +935,14 @@ export class ChatwootService {
       return null;
     }
 
-    // Memoiza por 30 min, igual que createConversation(), para que un doble
-    // click no dispare dos conversaciones para el mismo canal.
+    // Memoiza solo unos segundos — a diferencia del contacto/conversacion de
+    // un chat normal, este puede borrarse a mano en Chatwoot en cualquier
+    // momento; un TTL largo (como el de createConversation()) devolveria un
+    // conversationId ya inexistente como si fuera exito. Alcanza con esto
+    // para absorber un doble click; la proteccion real contra duplicados es
+    // la busqueda de conversacion existente mas abajo, que siempre es fresca.
     const cacheKey = `${instance.instanceName}:createNewsletterConversation-${jid}`;
+    const cacheTtlSeconds = 15;
     if (await this.cache.has(cacheKey)) {
       return (await this.cache.get(cacheKey)) as number;
     }
@@ -986,7 +991,7 @@ export class ChatwootService {
     );
 
     if (existing) {
-      this.cache.set(cacheKey, existing.id, 1800);
+      this.cache.set(cacheKey, existing.id, cacheTtlSeconds);
       return existing.id;
     }
 
@@ -1016,7 +1021,7 @@ export class ChatwootService {
       this.logger.warn(`Could not seed newsletter conversation ${conversation.id}: ${error}`);
     }
 
-    this.cache.set(cacheKey, conversation.id, 1800);
+    this.cache.set(cacheKey, conversation.id, cacheTtlSeconds);
     return conversation.id;
   }
 
