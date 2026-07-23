@@ -2078,56 +2078,22 @@ export class ChatwootService {
       const allowedJids: string[] = this.provider?.allowedJids ?? [];
       const remoteJidForFilter = body?.key?.remoteJid;
 
-      if (allowedJids.length > 0 && remoteJidForFilter && remoteJidForFilter !== 'status@broadcast') {
-        const normalized = this.normalizeJidIdentifier(remoteJidForFilter);
-        const isGroup = remoteJidForFilter.endsWith('@g.us');
-        const isNewsletter = remoteJidForFilter.endsWith('@newsletter');
-        const isContact = remoteJidForFilter.endsWith('@s.whatsapp.net') || remoteJidForFilter.endsWith('@lid');
-
-        const allowed =
-          allowedJids.includes(normalized) ||
-          // Para @lid normalizeJidIdentifier devuelve el JID completo, así que
-          // el número pelado (formato en el que se guardan las whitelists) hay
-          // que compararlo aparte.
-          allowedJids.includes(remoteJidForFilter.split('@')[0].replace(/:\d+/, '')) ||
-          (isGroup && allowedJids.includes('@g.us')) ||
-          (isNewsletter && allowedJids.includes('@newsletter')) ||
-          (isContact && allowedJids.includes('@s.whatsapp.net'));
-
-        if (!allowed) {
-          this.logger.warn('Blocking message from non-whitelisted jid: ' + remoteJidForFilter);
-          return;
-        }
+      if (
+        allowedJids.length > 0 &&
+        remoteJidForFilter &&
+        remoteJidForFilter !== 'status@broadcast' &&
+        !this.jidMatchesFilterList(allowedJids, remoteJidForFilter)
+      ) {
+        this.logger.warn('Blocking message from non-whitelisted jid: ' + remoteJidForFilter);
+        return;
       }
 
-      if (this.provider?.ignoreJids && this.provider?.ignoreJids.length > 0) {
-        const ignoreJids: any = this.provider?.ignoreJids;
-
-        let ignoreGroups = false;
-        let ignoreContacts = false;
-
-        if (ignoreJids.includes('@g.us')) {
-          ignoreGroups = true;
-        }
-
-        if (ignoreJids.includes('@s.whatsapp.net')) {
-          ignoreContacts = true;
-        }
-
-        if (ignoreGroups && body?.key?.remoteJid.endsWith('@g.us')) {
-          this.logger.warn('Ignoring message from group: ' + body?.key?.remoteJid);
-          return;
-        }
-
-        if (ignoreContacts && body?.key?.remoteJid.endsWith('@s.whatsapp.net')) {
-          this.logger.warn('Ignoring message from contact: ' + body?.key?.remoteJid);
-          return;
-        }
-
-        if (ignoreJids.includes(body?.key?.remoteJid)) {
-          this.logger.warn('Ignoring message from jid: ' + body?.key?.remoteJid);
-          return;
-        }
+      if (
+        this.provider?.ignoreJids?.length > 0 &&
+        this.jidMatchesFilterList(this.provider.ignoreJids, remoteJidForFilter)
+      ) {
+        this.logger.warn('Ignoring message from jid: ' + remoteJidForFilter);
+        return;
       }
 
       if (event === 'messages.upsert' || event === 'send.message') {
@@ -2672,6 +2638,40 @@ export class ChatwootService {
       return remoteJid;
     }
     return remoteJid.replace(/:\d+/, '').split('@')[0];
+  }
+
+  // ignoreJids/allowedJids pueden haber sido guardados por dos UIs distintas
+  // con formatos distintos: JID completo ("123@g.us"/"123@newsletter") desde
+  // el picker del Manager de Evolution, o numero pelado ("123") desde el
+  // filtro de privacidad dentro de Chatwoot. Matchea contra ambas formas mas
+  // los wildcards de categoria completa, asi da igual cual UI lo guardo.
+  private jidMatchesFilterList(list: string[], remoteJid: string): boolean {
+    if (!remoteJid || !list?.length) {
+      return false;
+    }
+
+    if (list.includes(remoteJid) || list.includes(this.normalizeJidIdentifier(remoteJid))) {
+      return true;
+    }
+
+    const stripped = remoteJid.split('@')[0].replace(/:\d+/, '');
+    if (list.includes(stripped)) {
+      return true;
+    }
+
+    if (remoteJid.endsWith('@g.us') && list.includes('@g.us')) {
+      return true;
+    }
+
+    if (remoteJid.endsWith('@newsletter') && list.includes('@newsletter')) {
+      return true;
+    }
+
+    if ((remoteJid.endsWith('@s.whatsapp.net') || remoteJid.endsWith('@lid')) && list.includes('@s.whatsapp.net')) {
+      return true;
+    }
+
+    return false;
   }
 
   public startImportHistoryMessages(instance: InstanceDto) {
