@@ -4542,6 +4542,26 @@ export class BaileysStartupService extends ChannelStartupService {
 
     if (data.follow !== false) {
       await this.client.newsletterFollow(metadata.id);
+
+      // Baileys solo emite eventos de canal cuando llega un mensaje nuevo — sin
+      // esto, un canal recién seguido no aparece en fetchAllNewsletters() hasta
+      // que publique algo, porque esa lista se arma leyendo la tabla `chat`.
+      if (this.configService.get<Database>('DATABASE').SAVE_DATA.CHATS) {
+        const existingChat = await this.prismaRepository.chat.findFirst({
+          where: { instanceId: this.instanceId, remoteJid: metadata.id },
+          select: { id: true },
+        });
+
+        if (!existingChat) {
+          try {
+            await this.prismaRepository.chat.create({
+              data: { remoteJid: metadata.id, instanceId: this.instanceId, name: metadata.name },
+            });
+          } catch {
+            console.log(`Chat insert record ignored: ${metadata.id} - ${this.instanceId}`);
+          }
+        }
+      }
     }
 
     return {
