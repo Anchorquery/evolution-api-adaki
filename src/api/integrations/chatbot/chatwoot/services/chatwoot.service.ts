@@ -434,42 +434,31 @@ export class ChatwootService {
       return null;
     }
 
-    // Direct search by query (q) - most common way to search by identifier/email/phone
-    const contact = (await (client as any).get('contacts/search', {
-      params: {
-        q: identifier,
-        sort: 'name',
-      },
+    // ChatwootClient no expone .get()/.post() genericos — hay que usar los
+    // metodos reales del SDK (contacts.search / contacts.filter).
+    const searchResult = (await client.contacts.search({
+      accountId: this.provider.accountId,
+      q: identifier,
+      sort: 'name',
     })) as any;
 
-    if (contact && contact.data && contact.data.payload && contact.data.payload.length > 0) {
-      return contact.data.payload[0];
+    if (searchResult?.payload?.length > 0) {
+      return searchResult.payload[0];
     }
 
-    // Fallback for older API versions or different response structures
-    if (contact && contact.payload && contact.payload.length > 0) {
-      return contact.payload[0];
-    }
-
-    // Try search by attribute
-    const contactByAttr = (await (client as any).post('contacts/filter', {
+    const filterResult = (await client.contacts.filter({
+      accountId: this.provider.accountId,
       payload: [
         {
           attribute_key: 'identifier',
           filter_operator: 'equal_to',
           values: [identifier],
-          query_operator: null,
         },
       ],
     })) as any;
 
-    if (contactByAttr && contactByAttr.payload && contactByAttr.payload.length > 0) {
-      return contactByAttr.payload[0];
-    }
-
-    // Check inside data property if using axios interceptors wrapper
-    if (contactByAttr && contactByAttr.data && contactByAttr.data.payload && contactByAttr.data.payload.length > 0) {
-      return contactByAttr.data.payload[0];
+    if (filterResult?.payload?.length > 0) {
+      return filterResult.payload[0];
     }
 
     return null;

@@ -4584,6 +4584,23 @@ export class BaileysStartupService extends ChannelStartupService {
           }
         }
       }
+
+      // Seguir un canal es el unico momento en que sabemos, con certeza, que
+      // hay exactamente UN canal nuevo — por eso el sync a Chatwoot corre solo
+      // aca y no en cada guardado de settings (ahi habria que diffear contra
+      // todos los canales ya seguidos en cada save, con llamadas a Chatwoot
+      // aunque el usuario solo haya tocado un campo sin relacion).
+      if (this.configService.get<Chatwoot>('CHATWOOT').ENABLED && this.localChatwoot?.enabled) {
+        try {
+          await this.chatwootService.createNewsletterConversation(
+            { instanceName: this.instance.name, instanceId: this.instanceId },
+            metadata.id,
+            metadata.name,
+          );
+        } catch (error) {
+          this.logger.warn(`Could not sync newsletter ${metadata.id} to Chatwoot: ${error}`);
+        }
+      }
     }
 
     return {
