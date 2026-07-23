@@ -958,6 +958,13 @@ export class ChatwootService {
     // Audiencia al armar una Campaña en Chatwoot.
     await this.addLabelToContact(this.provider.nameInbox, contactId);
 
+    // Chatwoot no tiene un "tipo" de contacto propio para distinguir un canal
+    // de un contacto real — sin esto, en la lista solo se ve el JID/nombre,
+    // indistinguible de cualquier otro contacto.
+    if (contact.company_name !== 'Canal de WhatsApp') {
+      await this.updateContact(instance, contactId, { company_name: 'Canal de WhatsApp' });
+    }
+
     const contactConversations = (await client.contacts.listConversations({
       accountId: this.provider.accountId,
       id: contactId,
@@ -981,6 +988,22 @@ export class ChatwootService {
     });
 
     if (!conversation?.id) return null;
+
+    // Una conversacion recien creada sin ningun mensaje (a diferencia de un
+    // contacto real, donde la primera conversacion siempre nace junto con un
+    // mensaje real) deja al frontend de Chatwoot sin ancla de paginacion —
+    // esta nota privada evita el loader de "mensajes anteriores" colgado.
+    try {
+      await this.createMessage(
+        instance,
+        conversation.id,
+        'Canal de WhatsApp sincronizado. Los mensajes que mandes desde acá se publican en el canal.',
+        'outgoing',
+        true,
+      );
+    } catch (error) {
+      this.logger.warn(`Could not seed newsletter conversation ${conversation.id}: ${error}`);
+    }
 
     this.cache.set(cacheKey, conversation.id, 1800);
     return conversation.id;

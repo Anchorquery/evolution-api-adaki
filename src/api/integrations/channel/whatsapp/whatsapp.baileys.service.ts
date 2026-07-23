@@ -3556,7 +3556,7 @@ export class BaileysStartupService extends ChannelStartupService {
             return new OnWhatsAppDto(jid, false, number);
           }
 
-          return new OnWhatsAppDto(metadata.id, true, number, metadata.name);
+          return new OnWhatsAppDto(metadata.id, true, number, this.extractNewsletterInfo(metadata).name);
         } catch {
           return new OnWhatsAppDto(jid, false, number);
         }
@@ -4527,11 +4527,12 @@ export class BaileysStartupService extends ChannelStartupService {
 
       try {
         const metadata = await this.client.newsletterMetadata('jid', chat.remoteJid);
+        const info = this.extractNewsletterInfo(metadata);
         newsletters.push({
           id: chat.remoteJid,
-          name: metadata?.name ?? chat.name,
-          description: metadata?.description,
-          pictureUrl: metadata?.picture?.directPath,
+          name: info.name ?? chat.name,
+          description: info.description,
+          pictureUrl: info.pictureUrl,
         });
       } catch (error) {
         this.logger.warn(`Could not fetch newsletter metadata for ${chat.remoteJid}: ${error}`);
@@ -4550,6 +4551,20 @@ export class BaileysStartupService extends ChannelStartupService {
     return fromUrl ? fromUrl[1] : trimmed;
   }
 
+  // newsletterMetadata() de Baileys no aplana la respuesta de WhatsApp — el
+  // nombre/descripcion/foto reales viven en thread_metadata.*.text (o
+  // .direct_path para la foto), no en las propiedades planas que sugiere el
+  // tipo declarado. Bug de Baileys, sigue abierto:
+  // github.com/WhiskeySockets/Baileys/issues/2204
+  private extractNewsletterInfo(metadata: any): { name?: string; description?: string; pictureUrl?: string } {
+    const thread = metadata?.thread_metadata;
+    return {
+      name: metadata?.name ?? thread?.name?.text,
+      description: metadata?.description ?? thread?.description?.text,
+      pictureUrl: metadata?.picture?.directPath ?? thread?.picture?.direct_path,
+    };
+  }
+
   public async followNewsletter(data: { inviteCode: string; follow?: boolean }) {
     if (!this.client) {
       throw new BadRequestException('Instance is not connected');
@@ -4561,6 +4576,8 @@ export class BaileysStartupService extends ChannelStartupService {
     if (!metadata?.id) {
       throw new NotFoundException('Newsletter not found for this invite code');
     }
+
+    const info = this.extractNewsletterInfo(metadata);
 
     if (data.follow !== false) {
       await this.client.newsletterFollow(metadata.id);
@@ -4577,7 +4594,7 @@ export class BaileysStartupService extends ChannelStartupService {
         if (!existingChat) {
           try {
             await this.prismaRepository.chat.create({
-              data: { remoteJid: metadata.id, instanceId: this.instanceId, name: metadata.name },
+              data: { remoteJid: metadata.id, instanceId: this.instanceId, name: info.name },
             });
           } catch {
             console.log(`Chat insert record ignored: ${metadata.id} - ${this.instanceId}`);
@@ -4595,7 +4612,7 @@ export class BaileysStartupService extends ChannelStartupService {
           await this.chatwootService.createNewsletterConversation(
             { instanceName: this.instance.name, instanceId: this.instanceId },
             metadata.id,
-            metadata.name,
+            info.name,
           );
         } catch (error) {
           this.logger.warn(`Could not sync newsletter ${metadata.id} to Chatwoot: ${error}`);
@@ -4605,8 +4622,8 @@ export class BaileysStartupService extends ChannelStartupService {
 
     return {
       id: metadata.id,
-      name: metadata.name,
-      description: metadata.description,
+      name: info.name,
+      description: info.description,
     };
   }
 
