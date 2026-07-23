@@ -624,6 +624,17 @@ export class ChatwootService {
     const isGroup = body.key.remoteJid.endsWith('@g.us');
     const phoneNumber = isLid && !isGroup ? body.key.remoteJidAlt : body.key.remoteJid;
     const { remoteJid } = body.key;
+
+    // Un mensaje real del canal (el dueño posteando, una reaccion, etc) llega
+    // por este mismo metodo via eventWhatsapp(), pero todo lo de abajo asume
+    // telefono/grupo: busca contacto por phone_number, y un canal no tiene
+    // uno real. Sin este atajo, cada mensaje nuevo crea un contacto y una
+    // conversacion DISTINTOS a la que ya armo createNewsletterConversation()
+    // (esa busca por identifier=jid), duplicando todo por canal.
+    if (remoteJid?.endsWith('@newsletter')) {
+      return this.createNewsletterConversation(instance, remoteJid, body.pushName);
+    }
+
     const cacheKey = `${instance.instanceName}:createConversation-${remoteJid}`;
     const lockKey = `${instance.instanceName}:lock:createConversation-${remoteJid}`;
     const maxWaitTime = 5000; // 5 seconds
