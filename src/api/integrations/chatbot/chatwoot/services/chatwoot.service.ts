@@ -925,14 +925,21 @@ export class ChatwootService {
   // contacto/conversacion directo por API para poder mandarle mensajes/campañas
   // desde Chatwoot sin depender de que llegue trafico real primero.
   public async createNewsletterConversation(instance: InstanceDto, jid: string, name?: string) {
+    if (!jid.endsWith('@newsletter')) {
+      throw new BadRequestException('jid must be a WhatsApp channel (@newsletter)');
+    }
+
     const client = await this.clientCw(instance);
     if (!client) {
       this.logger.warn('client not found');
       return null;
     }
 
-    if (!jid.endsWith('@newsletter')) {
-      throw new BadRequestException('jid must be a WhatsApp channel (@newsletter)');
+    // Memoiza por 30 min, igual que createConversation(), para que un doble
+    // click no dispare dos conversaciones para el mismo canal.
+    const cacheKey = `${instance.instanceName}:createNewsletterConversation-${jid}`;
+    if (await this.cache.has(cacheKey)) {
+      return (await this.cache.get(cacheKey)) as number;
     }
 
     const filterInbox = await this.getInbox(instance);
@@ -945,16 +952,18 @@ export class ChatwootService {
       contact = created?.payload?.contact || created?.payload || created;
     }
 
-    if (!contact) {
+    if (!contact?.id) {
       this.logger.warn(`Could not create or find contact for channel ${jid}`);
       return null;
     }
 
-    const contactId = contact?.id;
-    if (!contactId) {
-      this.logger.warn(`Contact for channel ${jid} has no id`);
-      return null;
-    }
+    const contactId = contact.id;
+
+    // createContact() ya etiqueta los contactos que crea con el nombre del
+    // inbox, pero si el contacto ya existia (canal seguido en una sesion
+    // anterior) ese paso nunca corrio — sin la etiqueta no aparece como
+    // Audiencia al armar una Campaña en Chatwoot.
+    await this.addLabelToContact(this.provider.nameInbox, contactId);
 
     const contactConversations = (await client.contacts.listConversations({
       accountId: this.provider.accountId,
@@ -966,6 +975,7 @@ export class ChatwootService {
     );
 
     if (existing) {
+      this.cache.set(cacheKey, existing.id, 1800);
       return existing.id;
     }
 
@@ -977,7 +987,10 @@ export class ChatwootService {
       },
     });
 
-    return conversation?.id ?? null;
+    if (!conversation?.id) return null;
+
+    this.cache.set(cacheKey, conversation.id, 1800);
+    return conversation.id;
   }
 
   public async createMessage(

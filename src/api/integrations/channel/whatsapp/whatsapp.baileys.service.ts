@@ -2294,7 +2294,7 @@ export class BaileysStartupService extends ChannelStartupService {
   ) {
     const isWA = (await this.whatsappNumber({ numbers: [number] }))?.shift();
 
-    if (!isWA.exists && !isJidGroup(isWA.jid) && !isWA.jid.includes('@broadcast')) {
+    if (!isWA.exists && !isJidGroup(isWA.jid) && !isWA.jid.includes('@broadcast') && !isJidNewsletter(isWA.jid)) {
       throw new BadRequestException(isWA);
     }
 
@@ -3507,15 +3507,18 @@ export class BaileysStartupService extends ChannelStartupService {
   public async whatsappNumber(data: WhatsAppNumberDto) {
     const jids: {
       groups: { number: string; jid: string }[];
+      newsletters: { number: string; jid: string }[];
       broadcast: { number: string; jid: string }[];
       users: { number: string; jid: string; name?: string }[];
-    } = { groups: [], broadcast: [], users: [] };
+    } = { groups: [], newsletters: [], broadcast: [], users: [] };
 
     data.numbers.forEach((number) => {
       const jid = createJid(number);
 
       if (isJidGroup(jid)) {
         jids.groups.push({ number, jid });
+      } else if (isJidNewsletter(jid)) {
+        jids.newsletters.push({ number, jid });
       } else if (jid === 'status@broadcast') {
         jids.broadcast.push({ number, jid });
       } else {
@@ -3541,6 +3544,25 @@ export class BaileysStartupService extends ChannelStartupService {
       }),
     );
     onWhatsapp.push(...groups);
+
+    // NEWSLETTERS (canales): no son "usuarios" de WhatsApp, onWhatsApp() no
+    // aplica. Se verifican igual que los grupos, resolviendo su metadata.
+    const newsletters = await Promise.all(
+      jids.newsletters.map(async ({ jid, number }) => {
+        try {
+          const metadata = await this.client.newsletterMetadata('jid', jid);
+
+          if (!metadata?.id) {
+            return new OnWhatsAppDto(jid, false, number);
+          }
+
+          return new OnWhatsAppDto(metadata.id, true, number, metadata.name);
+        } catch {
+          return new OnWhatsAppDto(jid, false, number);
+        }
+      }),
+    );
+    onWhatsapp.push(...newsletters);
 
     // USERS
     const contacts: any[] = await this.prismaRepository.contact.findMany({
