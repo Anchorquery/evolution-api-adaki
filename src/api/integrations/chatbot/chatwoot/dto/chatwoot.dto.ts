@@ -22,6 +22,11 @@ export class ChatwootDto {
   allowedJids?: string[];
 }
 
+export class ChatwootNewsletterSyncDto {
+  jid: string;
+  name?: string;
+}
+
 export function ChatwootInstanceMixin<TBase extends Constructor>(Base: TBase) {
   return class extends Base {
     chatwootAccountId?: string;

@@ -748,6 +748,18 @@ export class ChannelStartupService {
         AND "Message"."messageTimestamp" <= ${Math.floor(new Date(query.where.messageTimestamp.lte).getTime() / 1000)}`
         : Prisma.sql``;
 
+    // Busqueda por nombre: con miles de contactos no se puede mandar todo al
+    // cliente, asi que el filtro corre en SQL antes del LIMIT/OFFSET.
+    const pushNameFilter = query?.where?.pushName
+      ? Prisma.sql`
+        AND (
+          "Contact"."pushName" ILIKE ${'%' + query.where.pushName + '%'}
+          OR "Chat"."name" ILIKE ${'%' + query.where.pushName + '%'}
+          OR "Message"."pushName" ILIKE ${'%' + query.where.pushName + '%'}
+          OR "Message"."key"->>'remoteJid' ILIKE ${'%' + query.where.pushName + '%'}
+        )`
+      : Prisma.sql``;
+
     const limit = query?.take ? Prisma.sql`LIMIT ${query.take}` : Prisma.sql``;
     const offset = query?.skip ? Prisma.sql`OFFSET ${query.skip}` : Prisma.sql``;
 
@@ -791,6 +803,7 @@ export class ChannelStartupService {
         WHERE "Message"."instanceId" = ${this.instanceId}
         ${remoteJid ? Prisma.sql`AND "Message"."key"->>'remoteJid' = ${remoteJid}` : Prisma.sql``}
         ${timestampFilter}
+        ${pushNameFilter}
         ORDER BY "Message"."key"->>'remoteJid', "Message"."messageTimestamp" DESC
       )
       SELECT * FROM rankedMessages 

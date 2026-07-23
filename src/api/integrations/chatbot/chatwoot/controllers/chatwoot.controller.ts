@@ -1,5 +1,5 @@
 import { InstanceDto } from '@api/dto/instance.dto';
-import { ChatwootDto } from '@api/integrations/chatbot/chatwoot/dto/chatwoot.dto';
+import { ChatwootDto, ChatwootNewsletterSyncDto } from '@api/integrations/chatbot/chatwoot/dto/chatwoot.dto';
 import { ChatwootService } from '@api/integrations/chatbot/chatwoot/services/chatwoot.service';
 import { Chatwoot, ConfigService, HttpServer } from '@config/env.config';
 import { BadRequestException } from '@exceptions';
@@ -80,5 +80,17 @@ export class ChatwootController {
     if (!this.configService.get<Chatwoot>('CHATWOOT').ENABLED) throw new BadRequestException('Chatwoot is disabled');
 
     return this.chatwootService.receiveWebhook(instance, data);
+  }
+
+  public async syncNewsletter(instance: InstanceDto, data: ChatwootNewsletterSyncDto) {
+    if (!this.configService.get<Chatwoot>('CHATWOOT').ENABLED) throw new BadRequestException('Chatwoot is disabled');
+
+    const conversationId = await this.chatwootService.createNewsletterConversation(instance, data.jid, data.name);
+
+    if (!conversationId) {
+      throw new BadRequestException('Could not create Chatwoot conversation for this channel');
+    }
+
+    return { conversationId };
   }
 }

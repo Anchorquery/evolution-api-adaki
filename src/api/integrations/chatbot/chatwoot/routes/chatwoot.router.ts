@@ -1,9 +1,9 @@
 import { RouterBroker } from '@api/abstract/abstract.router';
 import { InstanceDto } from '@api/dto/instance.dto';
-import { ChatwootDto } from '@api/integrations/chatbot/chatwoot/dto/chatwoot.dto';
+import { ChatwootDto, ChatwootNewsletterSyncDto } from '@api/integrations/chatbot/chatwoot/dto/chatwoot.dto';
 import { HttpStatus } from '@api/routes/index.router';
 import { chatwootController } from '@api/server.module';
-import { chatwootSchema, instanceSchema } from '@validate/validate.schema';
+import { chatwootNewsletterSyncSchema, chatwootSchema, instanceSchema } from '@validate/validate.schema';
 import { RequestHandler, Router } from 'express';
 
 export class ChatwootRouter extends RouterBroker {
@@ -39,6 +39,16 @@ export class ChatwootRouter extends RouterBroker {
         });
 
         res.status(HttpStatus.OK).json(response);
+      })
+      .post(this.routerPath('syncNewsletter'), ...guards, async (req, res) => {
+        const response = await this.dataValidate<ChatwootNewsletterSyncDto>({
+          request: req,
+          schema: chatwootNewsletterSyncSchema,
+          ClassRef: ChatwootNewsletterSyncDto,
+          execute: (instance, data) => chatwootController.syncNewsletter(instance, data),
+        });
+
+        res.status(HttpStatus.CREATED).json(response);
       });
   }
 

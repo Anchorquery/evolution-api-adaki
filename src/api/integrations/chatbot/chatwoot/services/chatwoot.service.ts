@@ -9,6 +9,7 @@ import { WAMonitoringService } from '@api/services/monitor.service';
 import { Events } from '@api/types/wa.types';
 import { Chatwoot, ConfigService, Database, HttpServer } from '@config/env.config';
 import { Logger } from '@config/logger.config';
+import { BadRequestException } from '@exceptions';
 import ChatwootClient, {
   ChatwootAPIConfig,
   contact,
@@ -915,6 +916,68 @@ export class ChatwootService {
 
     this.cache.set(cacheKey, findByName);
     return findByName;
+  }
+
+  // Los canales de WhatsApp (@newsletter) no generan mensajes 1:1 normales, asi
+  // que nunca disparan createConversation() via eventWhatsapp — ese metodo ademas
+  // asume telefono/grupo en cada paso (profilePicture por numero, chatId como
+  // telefono, etc) y rompe con un JID de canal. Esta version minima crea el
+  // contacto/conversacion directo por API para poder mandarle mensajes/campañas
+  // desde Chatwoot sin depender de que llegue trafico real primero.
+  public async createNewsletterConversation(instance: InstanceDto, jid: string, name?: string) {
+    const client = await this.clientCw(instance);
+    if (!client) {
+      this.logger.warn('client not found');
+      return null;
+    }
+
+    if (!jid.endsWith('@newsletter')) {
+      throw new BadRequestException('jid must be a WhatsApp channel (@newsletter)');
+    }
+
+    const filterInbox = await this.getInbox(instance);
+    if (!filterInbox) return null;
+
+    let contact = await this.findContactByIdentifier(instance, jid);
+
+    if (!contact) {
+      const created = await this.createContact(instance, jid.split('@')[0], filterInbox.id, false, name || jid, undefined, jid);
+      contact = created?.payload?.contact || created?.payload || created;
+    }
+
+    if (!contact) {
+      this.logger.warn(`Could not create or find contact for channel ${jid}`);
+      return null;
+    }
+
+    const contactId = contact?.id;
+    if (!contactId) {
+      this.logger.warn(`Contact for channel ${jid} has no id`);
+      return null;
+    }
+
+    const contactConversations = (await client.contacts.listConversations({
+      accountId: this.provider.accountId,
+      id: contactId,
+    })) as any;
+
+    const existing = contactConversations?.payload?.find(
+      (conversation) => conversation.inbox_id == filterInbox.id && conversation.status !== 'resolved',
+    );
+
+    if (existing) {
+      return existing.id;
+    }
+
+    const conversation = await client.conversations.create({
+      accountId: this.provider.accountId,
+      data: {
+        contact_id: contactId.toString(),
+        inbox_id: filterInbox.id.toString(),
+      },
+    });
+
+    return conversation?.id ?? null;
   }
 
   public async createMessage(

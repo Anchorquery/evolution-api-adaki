@@ -44,3 +44,14 @@ export const chatwootSchema: JSONSchema7 = {
   required: ['enabled', 'accountId', 'token', 'url', 'signMsg', 'reopenConversation', 'conversationPending'],
   ...isNotEmpty('enabled', 'accountId', 'token', 'url', 'signMsg', 'reopenConversation', 'conversationPending'),
 };
+
+export const chatwootNewsletterSyncSchema: JSONSchema7 = {
+  $id: v4(),
+  type: 'object',
+  properties: {
+    jid: { type: 'string', minLength: 1 },
+    name: { type: 'string' },
+  },
+  required: ['jid'],
+  ...isNotEmpty('jid'),
+};
