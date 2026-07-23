@@ -937,7 +937,11 @@ export class ChatwootService {
     let contact = await this.findContactByIdentifier(instance, jid);
 
     if (!contact) {
-      const created = await this.createContact(instance, jid.split('@')[0], filterInbox.id, false, name || jid, undefined, jid);
+      // isGroup=true no es "es un grupo", es "identificar por jid, no por
+      // telefono" — la rama !isGroup de createContact siempre agrega
+      // phone_number, y un canal no tiene uno real (mandaria el ID numerico
+      // del canal disfrazado de telefono).
+      const created = await this.createContact(instance, jid, filterInbox.id, true, name || jid, undefined, jid);
       contact = created?.payload?.contact || created?.payload || created;
     }
 
