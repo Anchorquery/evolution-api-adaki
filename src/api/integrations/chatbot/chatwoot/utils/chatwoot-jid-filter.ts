@@ -18,6 +18,11 @@ export function normalizeJidIdentifier(remoteJid: string): string {
 // picker del Manager de Evolution, o número pelado ("123") desde el filtro de
 // privacidad dentro de Chatwoot. Matchea contra ambas formas más los wildcards
 // de categoría completa, así da igual cuál UI lo guardó.
+//
+// Limitación conocida: el matching es de texto puro y NO resuelve lid↔teléfono.
+// Un chat que WhatsApp migró a "@lid" no matchea su entrada guardada por
+// teléfono: en modo allow se bloquea un seleccionado, en modo block se cuela
+// un excluido. Detalle y mitigación en DEPLOY-ADAKI.md ("Limitación conocida").
 export function jidMatchesFilterList(list: string[], remoteJid: string): boolean {
   if (!remoteJid || !list?.length) {
     return false;

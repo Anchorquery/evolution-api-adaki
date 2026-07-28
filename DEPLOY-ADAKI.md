@@ -141,6 +141,34 @@ ALTER TABLE "Setting"  DROP COLUMN "newsletterIgnore";
 ALTER TABLE "Chatwoot" DROP COLUMN "allowedJids";
 ```
 
+## Limitación conocida: JIDs `@lid` y el filtro de privacidad
+
+WhatsApp está migrando chats del identificador clásico por teléfono
+(`34600111222@s.whatsapp.net`) a un identificador opaco de privacidad
+(`204987654321098@lid`). El número de un `@lid` **no es el teléfono** y no se
+deduce de él; WhatsApp decide por chat cuál usa (chats nuevos y usuarios con
+ajustes de privacidad estrictos llegan cada vez más como `@lid`).
+
+El matching del filtro (`chatwoot-jid-filter.ts`) es de texto puro: no traduce
+lid↔teléfono. Consecuencia, si un chat migra a `@lid`:
+
+- **Modo "permitir"**: un contacto seleccionado por teléfono queda bloqueado
+  aunque esté en la lista (falla cerrada: no se filtra nada indebido, pero deja
+  de llegar alguien que sí debía llegar).
+- **Modo "excluir"**: un contacto excluido por teléfono se cuela (falla
+  abierta: reaparece en Chatwoot un chat que se quería ocultar).
+
+Cómo reconocerlo: el log de Evolution muestra `Blocking message from
+non-whitelisted jid: ...@lid` para alguien que está seleccionado, o llega a
+Chatwoot un chat excluido cuyo identifier termina en `@lid`. Mitigación manual
+mientras tanto: agregar también el número lid a la lista (se ve en ese mismo
+log o en la tabla `Contact` de Evolution).
+
+Fix real pendiente: al matchear un `@lid`, resolver el teléfono equivalente con
+los datos de Baileys (campos `senderPn`/`remoteJidAlt` del mensaje y el mapping
+lid↔pn que Evolution ya persiste con los contactos) y comparar ambas
+identidades.
+
 ## Pendiente de probar antes de producción
 
 - `POST /newsletter/follow/{instance}` — nunca se ejercitó, falta un link de
