@@ -1,5 +1,6 @@
 import { InstanceDto } from '@api/dto/instance.dto';
 import { ChatwootDto } from '@api/integrations/chatbot/chatwoot/dto/chatwoot.dto';
+import { isJidBlockedByPrivacyFilter } from '@api/integrations/chatbot/chatwoot/utils/chatwoot-jid-filter';
 import { postgresClient } from '@api/integrations/chatbot/chatwoot/libs/postgres.client';
 import { ChatwootService } from '@api/integrations/chatbot/chatwoot/services/chatwoot.service';
 import { Chatwoot, configService } from '@config/env.config';
@@ -88,7 +89,12 @@ class ChatwootImport {
 
       let totalContactsImported = 0;
 
-      const contacts = this.historyContacts.get(instance.instanceName) || [];
+      // Mismo filtro de privacidad que el flujo en vivo: sin esto, el import
+      // masivo de contactos re-mete a Chatwoot justo lo que ignoreJids/
+      // allowedJids excluyen.
+      const contacts = (this.historyContacts.get(instance.instanceName) || []).filter(
+        (contact) => !isJidBlockedByPrivacyFilter(provider, contact.remoteJid),
+      );
       if (contacts.length === 0) {
         return 0;
       }
@@ -222,7 +228,11 @@ class ChatwootImport {
 
       let totalMessagesImported = 0;
 
-      let messagesOrdered = this.historyMessages.get(instance.instanceName) || [];
+      // Mismo filtro de privacidad que el flujo en vivo (ver eventWhatsapp):
+      // el import de historial no debe traer chats que el filtro excluye.
+      let messagesOrdered = (this.historyMessages.get(instance.instanceName) || []).filter(
+        (message) => !isJidBlockedByPrivacyFilter(provider, (message.key as { remoteJid?: string })?.remoteJid),
+      );
       if (messagesOrdered.length === 0) {
         return 0;
       }

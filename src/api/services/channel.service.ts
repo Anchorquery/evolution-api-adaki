@@ -293,6 +293,7 @@ export class ChannelStartupService {
           organization: data.organization,
           logo: data.logo,
           ignoreJids: data.ignoreJids,
+          allowedJids: data.allowedJids,
         },
       });
 
@@ -320,6 +321,7 @@ export class ChannelStartupService {
         organization: data.organization,
         logo: data.logo,
         ignoreJids: data.ignoreJids,
+        allowedJids: data.allowedJids,
         instanceId: this.instanceId,
       },
     });
@@ -345,6 +347,7 @@ export class ChannelStartupService {
     }
 
     const ignoreJidsArray = Array.isArray(data.ignoreJids) ? data.ignoreJids.map((event) => String(event)) : [];
+    const allowedJidsArray = Array.isArray(data.allowedJids) ? data.allowedJids.map((event) => String(event)) : [];
 
     return {
       enabled: data?.enabled,
@@ -363,6 +366,7 @@ export class ChannelStartupService {
       organization: data.organization,
       logo: data.logo,
       ignoreJids: ignoreJidsArray,
+      allowedJids: allowedJidsArray,
     };
   }
 

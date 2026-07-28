@@ -3,6 +3,10 @@ import { Options, Quoted, SendAudioDto, SendMediaDto, SendTextDto } from '@api/d
 import { ChatwootDto } from '@api/integrations/chatbot/chatwoot/dto/chatwoot.dto';
 import { postgresClient } from '@api/integrations/chatbot/chatwoot/libs/postgres.client';
 import { chatwootImport } from '@api/integrations/chatbot/chatwoot/utils/chatwoot-import-helper';
+import {
+  jidMatchesFilterList,
+  normalizeJidIdentifier,
+} from '@api/integrations/chatbot/chatwoot/utils/chatwoot-jid-filter';
 import { PrismaRepository } from '@api/repository/repository.service';
 import { CacheService } from '@api/services/cache.service';
 import { WAMonitoringService } from '@api/services/monitor.service';
@@ -2631,47 +2635,12 @@ export class ChatwootService {
   }
 
   public normalizeJidIdentifier(remoteJid: string) {
-    if (!remoteJid) {
-      return '';
-    }
-    if (remoteJid.includes('@lid')) {
-      return remoteJid;
-    }
-    return remoteJid.replace(/:\d+/, '').split('@')[0];
+    return normalizeJidIdentifier(remoteJid);
   }
 
-  // ignoreJids/allowedJids pueden haber sido guardados por dos UIs distintas
-  // con formatos distintos: JID completo ("123@g.us"/"123@newsletter") desde
-  // el picker del Manager de Evolution, o numero pelado ("123") desde el
-  // filtro de privacidad dentro de Chatwoot. Matchea contra ambas formas mas
-  // los wildcards de categoria completa, asi da igual cual UI lo guardo.
+  // Matching compartido con el import de historial: ver chatwoot-jid-filter.ts.
   private jidMatchesFilterList(list: string[], remoteJid: string): boolean {
-    if (!remoteJid || !list?.length) {
-      return false;
-    }
-
-    if (list.includes(remoteJid) || list.includes(this.normalizeJidIdentifier(remoteJid))) {
-      return true;
-    }
-
-    const stripped = remoteJid.split('@')[0].replace(/:\d+/, '');
-    if (list.includes(stripped)) {
-      return true;
-    }
-
-    if (remoteJid.endsWith('@g.us') && list.includes('@g.us')) {
-      return true;
-    }
-
-    if (remoteJid.endsWith('@newsletter') && list.includes('@newsletter')) {
-      return true;
-    }
-
-    if ((remoteJid.endsWith('@s.whatsapp.net') || remoteJid.endsWith('@lid')) && list.includes('@s.whatsapp.net')) {
-      return true;
-    }
-
-    return false;
+    return jidMatchesFilterList(list, remoteJid);
   }
 
   public startImportHistoryMessages(instance: InstanceDto) {
