@@ -1,8 +1,8 @@
 import { InstanceDto } from '@api/dto/instance.dto';
 import { ChatwootDto } from '@api/integrations/chatbot/chatwoot/dto/chatwoot.dto';
-import { isJidBlockedByPrivacyFilter } from '@api/integrations/chatbot/chatwoot/utils/chatwoot-jid-filter';
 import { postgresClient } from '@api/integrations/chatbot/chatwoot/libs/postgres.client';
 import { ChatwootService } from '@api/integrations/chatbot/chatwoot/services/chatwoot.service';
+import { isJidBlockedByPrivacyFilter } from '@api/integrations/chatbot/chatwoot/utils/chatwoot-jid-filter';
 import { Chatwoot, configService } from '@config/env.config';
 import { Logger } from '@config/logger.config';
 import { inbox } from '@figuro/chatwoot-sdk';
@@ -230,12 +230,10 @@ class ChatwootImport {
 
       // Mismo filtro de privacidad que el flujo en vivo (ver eventWhatsapp):
       // el import de historial no debe traer chats que el filtro excluye.
-      let messagesOrdered = (this.historyMessages.get(instance.instanceName) || []).filter(
-        (message) => {
-          const key = message.key as { remoteJid?: string; remoteJidAlt?: string };
-          return !isJidBlockedByPrivacyFilter(provider, key?.remoteJid, key?.remoteJidAlt);
-        },
-      );
+      let messagesOrdered = (this.historyMessages.get(instance.instanceName) || []).filter((message) => {
+        const key = message.key as { remoteJid?: string; remoteJidAlt?: string };
+        return !isJidBlockedByPrivacyFilter(provider, key?.remoteJid, key?.remoteJidAlt);
+      });
       if (messagesOrdered.length === 0) {
         return 0;
       }
