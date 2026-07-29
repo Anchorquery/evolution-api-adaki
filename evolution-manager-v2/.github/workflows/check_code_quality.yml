@@ -1,6 +1,6 @@
 name: Check Code Quality
 
-on: 
+on:
   pull_request:
     branches: [ main, develop ]
   push:
@@ -28,13 +28,13 @@ jobs:
           ${{ runner.os }}-node-
 
     - name: Install packages
-      run: npm ci
-    
+      run: npm ci --ignore-scripts
+
     - name: Check linting
       run: npm run lint:check
 
-    - name: Generate Prisma client
-      run: npm run db:generate
+    - name: Check TypeScript
+      run: npm run type-check
 
     - name: Check build
       run: npm run build

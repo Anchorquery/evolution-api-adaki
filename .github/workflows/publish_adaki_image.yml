@@ -4,10 +4,11 @@ name: Publish Adaki image to GHCR
 # Coolify la va a tirar. Usa GITHUB_TOKEN, así que no hace falta configurar
 # ningún secreto extra.
 #
-# Nota: NO se hace checkout de submódulos a propósito. El repo referencia un
-# commit de evolution-manager-v2 que upstream borró al mover de organización,
-# así que `submodules: recursive` falla. El Dockerfile no lo necesita: copia
-# `./manager`, que ya está versionado.
+# Nota: ya no hay submódulos. El código del Manager vive directamente en
+# `evolution-manager-v2/` dentro de este repo (antes era un submódulo apuntando a
+# upstream, donde no tenemos escritura, así que nuestras modificaciones no se
+# podían versionar). El Dockerfile sigue copiando `./manager`, el bundle ya
+# compilado que también está versionado.
 
 on:
   push:
