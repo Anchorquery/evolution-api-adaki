@@ -4,7 +4,7 @@ import { ChatwootDto } from '@api/integrations/chatbot/chatwoot/dto/chatwoot.dto
 import { postgresClient } from '@api/integrations/chatbot/chatwoot/libs/postgres.client';
 import { chatwootImport } from '@api/integrations/chatbot/chatwoot/utils/chatwoot-import-helper';
 import {
-  jidMatchesFilterList,
+  isJidBlockedByPrivacyFilter,
   normalizeJidIdentifier,
 } from '@api/integrations/chatbot/chatwoot/utils/chatwoot-jid-filter';
 import { PrismaRepository } from '@api/repository/repository.service';
@@ -2075,28 +2075,20 @@ export class ChatwootService {
         return null;
       }
 
-      // Whitelist de privacidad: solo se aplica a eventos que traen un remoteJid
+      // Filtro de privacidad: solo se aplica a eventos que traen un remoteJid
       // (mensajes). Eventos de infraestructura como QRCODE_UPDATED,
       // STATUS_INSTANCE o CONNECTION_UPDATE llegan sin `key`, y filtrarlos
       // dejaría la instancia sin forma de reconectarse desde Chatwoot.
-      const allowedJids: string[] = this.provider?.allowedJids ?? [];
+      //
+      // remoteJidAlt viaja junto al mensaje cuando el chat está en modo lid.
+      // Este dispatch corre ANTES de que messages.upsert reemplace remoteJid
+      // por remoteJidAlt (whatsapp.baileys.service.ts), así que acá el JID
+      // todavía es el "@lid" opaco y hay que matchear contra ambos.
       const remoteJidForFilter = body?.key?.remoteJid;
+      const altJidForFilter = body?.key?.remoteJidAlt;
 
-      if (
-        allowedJids.length > 0 &&
-        remoteJidForFilter &&
-        remoteJidForFilter !== 'status@broadcast' &&
-        !this.jidMatchesFilterList(allowedJids, remoteJidForFilter)
-      ) {
-        this.logger.warn('Blocking message from non-whitelisted jid: ' + remoteJidForFilter);
-        return;
-      }
-
-      if (
-        this.provider?.ignoreJids?.length > 0 &&
-        this.jidMatchesFilterList(this.provider.ignoreJids, remoteJidForFilter)
-      ) {
-        this.logger.warn('Ignoring message from jid: ' + remoteJidForFilter);
+      if (remoteJidForFilter && isJidBlockedByPrivacyFilter(this.provider, remoteJidForFilter, altJidForFilter)) {
+        this.logger.warn(`Privacy filter blocked jid: ${remoteJidForFilter} (alt: ${altJidForFilter ?? 'none'})`);
         return;
       }
 
@@ -2636,11 +2628,6 @@ export class ChatwootService {
 
   public normalizeJidIdentifier(remoteJid: string) {
     return normalizeJidIdentifier(remoteJid);
-  }
-
-  // Matching compartido con el import de historial: ver chatwoot-jid-filter.ts.
-  private jidMatchesFilterList(list: string[], remoteJid: string): boolean {
-    return jidMatchesFilterList(list, remoteJid);
   }
 
   public startImportHistoryMessages(instance: InstanceDto) {

@@ -231,7 +231,10 @@ class ChatwootImport {
       // Mismo filtro de privacidad que el flujo en vivo (ver eventWhatsapp):
       // el import de historial no debe traer chats que el filtro excluye.
       let messagesOrdered = (this.historyMessages.get(instance.instanceName) || []).filter(
-        (message) => !isJidBlockedByPrivacyFilter(provider, (message.key as { remoteJid?: string })?.remoteJid),
+        (message) => {
+          const key = message.key as { remoteJid?: string; remoteJidAlt?: string };
+          return !isJidBlockedByPrivacyFilter(provider, key?.remoteJid, key?.remoteJidAlt);
+        },
       );
       if (messagesOrdered.length === 0) {
         return 0;

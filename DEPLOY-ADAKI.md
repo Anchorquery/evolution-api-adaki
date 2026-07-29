@@ -141,7 +141,7 @@ ALTER TABLE "Setting"  DROP COLUMN "newsletterIgnore";
 ALTER TABLE "Chatwoot" DROP COLUMN "allowedJids";
 ```
 
-## Limitación conocida: JIDs `@lid` y el filtro de privacidad
+## JIDs `@lid` y el filtro de privacidad
 
 WhatsApp está migrando chats del identificador clásico por teléfono
 (`34600111222@s.whatsapp.net`) a un identificador opaco de privacidad
@@ -149,25 +149,22 @@ WhatsApp está migrando chats del identificador clásico por teléfono
 deduce de él; WhatsApp decide por chat cuál usa (chats nuevos y usuarios con
 ajustes de privacidad estrictos llegan cada vez más como `@lid`).
 
-El matching del filtro (`chatwoot-jid-filter.ts`) es de texto puro: no traduce
-lid↔teléfono. Consecuencia, si un chat migra a `@lid`:
+Ningún picker muestra el lid, así que las listas del filtro siempre se guardan
+con el teléfono. El matching (`chatwoot-jid-filter.ts`) compara **las dos
+identidades**: el `key.remoteJid` que trae el evento y su `key.remoteJidAlt`,
+que Baileys adjunta con la otra forma del mismo chat. Esto importa porque el
+dispatch a Chatwoot corre *antes* de que `messages.upsert` reemplace
+`remoteJid` por `remoteJidAlt` (`whatsapp.baileys.service.ts`), o sea que el
+filtro ve el `@lid` crudo.
 
-- **Modo "permitir"**: un contacto seleccionado por teléfono queda bloqueado
-  aunque esté en la lista (falla cerrada: no se filtra nada indebido, pero deja
-  de llegar alguien que sí debía llegar).
-- **Modo "excluir"**: un contacto excluido por teléfono se cuela (falla
-  abierta: reaparece en Chatwoot un chat que se quería ocultar).
+Hasta que esto se corrigió, un chat migrado a `@lid` quedaba bloqueado en modo
+"permitir" (estaba seleccionado por teléfono y no llegaba nada) y se colaba en
+modo "excluir".
 
-Cómo reconocerlo: el log de Evolution muestra `Blocking message from
-non-whitelisted jid: ...@lid` para alguien que está seleccionado, o llega a
-Chatwoot un chat excluido cuyo identifier termina en `@lid`. Mitigación manual
-mientras tanto: agregar también el número lid a la lista (se ve en ese mismo
-log o en la tabla `Contact` de Evolution).
-
-Fix real pendiente: al matchear un `@lid`, resolver el teléfono equivalente con
-los datos de Baileys (campos `senderPn`/`remoteJidAlt` del mensaje y el mapping
-lid↔pn que Evolution ya persiste con los contactos) y comparar ambas
-identidades.
+Residual: si un evento llega sin `remoteJidAlt` (mensajes muy viejos del
+historial, por ejemplo), sigue sin haber forma de traducir el lid. Se reconoce
+en el log de Evolution por `Privacy filter blocked jid: ...@lid (alt: none)`.
+Mitigación: agregar también el número lid a la lista.
 
 ## Pendiente de probar antes de producción
 

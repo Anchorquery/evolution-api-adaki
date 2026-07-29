@@ -19,12 +19,8 @@ export function normalizeJidIdentifier(remoteJid: string): string {
 // privacidad dentro de Chatwoot. Matchea contra ambas formas más los wildcards
 // de categoría completa, así da igual cuál UI lo guardó.
 //
-// Limitación conocida: el matching es de texto puro y NO resuelve lid↔teléfono.
-// Un chat que WhatsApp migró a "@lid" no matchea su entrada guardada por
-// teléfono: en modo allow se bloquea un seleccionado, en modo block se cuela
-// un excluido. Detalle y mitigación en DEPLOY-ADAKI.md ("Limitación conocida").
-export function jidMatchesFilterList(list: string[], remoteJid: string): boolean {
-  if (!remoteJid || !list?.length) {
+function matchesSingleJid(list: string[], remoteJid: string): boolean {
+  if (!remoteJid) {
     return false;
   }
 
@@ -52,22 +48,37 @@ export function jidMatchesFilterList(list: string[], remoteJid: string): boolean
   return false;
 }
 
+// `altJid` es la otra identidad del mismo chat cuando WhatsApp lo migró al
+// identificador opaco de privacidad: el mensaje llega con
+// key.remoteJid = "204…@lid" y key.remoteJidAlt = "34600111222@s.whatsapp.net".
+// Ninguna UI puede guardar el lid (no se ve en ningún picker), así que sin
+// mirar el alt un contacto seleccionado por teléfono quedaba bloqueado en modo
+// allow y uno excluido se colaba en modo block.
+export function jidMatchesFilterList(list: string[], remoteJid: string, altJid?: string): boolean {
+  if (!remoteJid || !list?.length) {
+    return false;
+  }
+
+  return matchesSingleJid(list, remoteJid) || (!!altJid && altJid !== remoteJid && matchesSingleJid(list, altJid));
+}
+
 // true => el filtro de privacidad manda a descartar este chat.
 // 'status@broadcast' queda fuera del whitelist a propósito: no es un chat
 // elegible en ningún picker y ya se descarta más adelante en el flujo normal.
 export function isJidBlockedByPrivacyFilter(
   provider: { ignoreJids?: unknown; allowedJids?: unknown } | null | undefined,
   remoteJid: string,
+  altJid?: string,
 ): boolean {
   if (!remoteJid) {
     return false;
   }
 
   const allowed = Array.isArray(provider?.allowedJids) ? provider.allowedJids.map(String) : [];
-  if (allowed.length > 0 && remoteJid !== 'status@broadcast' && !jidMatchesFilterList(allowed, remoteJid)) {
+  if (allowed.length > 0 && remoteJid !== 'status@broadcast' && !jidMatchesFilterList(allowed, remoteJid, altJid)) {
     return true;
   }
 
   const ignored = Array.isArray(provider?.ignoreJids) ? provider.ignoreJids.map(String) : [];
-  return ignored.length > 0 && jidMatchesFilterList(ignored, remoteJid);
+  return ignored.length > 0 && jidMatchesFilterList(ignored, remoteJid, altJid);
 }
