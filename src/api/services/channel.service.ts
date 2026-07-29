@@ -767,12 +767,20 @@ export class ChannelStartupService {
     const limit = query?.take ? Prisma.sql`LIMIT ${query.take}` : Prisma.sql``;
     const offset = query?.skip ? Prisma.sql`OFFSET ${query.skip}` : Prisma.sql``;
 
-    const results = await this.prismaRepository.$queryRaw`
+    // $queryRaw sin parametro de tipo devuelve `unknown`, y entonces
+    // results.length/.map no compilan. Las columnas salen de un SELECT crudo, asi
+    // que no hay tipo generado que aplicar: any[] es lo honesto aqui.
+    const results = await this.prismaRepository.$queryRaw<any[]>`
       WITH rankedMessages AS (
         SELECT DISTINCT ON ("Message"."key"->>'remoteJid') 
           "Contact"."id" as "contactId",
           "Message"."key"->>'remoteJid' as "remoteJid",
-          CASE 
+          -- Un solo alias "pushName": habia un segundo '"Chat"."name" as "pushName"'
+          -- mas abajo que pisaba este COALESCE al mapear la fila a objeto, asi que
+          -- el nombre siempre acababa siendo Chat.name — NULL en chats 1:1, donde
+          -- el nombre vive en Contact.pushName. Resultado: los pickers de
+          -- privacidad mostraban el numero crudo del JID en vez del nombre.
+          CASE
             WHEN "Message"."key"->>'remoteJid' LIKE '%@g.us' THEN COALESCE("Chat"."name", "Contact"."pushName")
             ELSE COALESCE("Contact"."pushName", "Message"."pushName")
           END as "pushName",
@@ -781,7 +789,6 @@ export class ChannelStartupService {
             to_timestamp("Message"."messageTimestamp"::double precision), 
             "Contact"."updatedAt"
           ) as "updatedAt",
-          "Chat"."name" as "pushName",
           "Chat"."createdAt" as "windowStart",
           "Chat"."createdAt" + INTERVAL '24 hours' as "windowExpires",
           "Chat"."unreadMessages" as "unreadMessages",
@@ -817,6 +824,8 @@ export class ChannelStartupService {
     `;
 
     if (results && isArray(results) && results.length > 0) {
+      const lidPhoneNumbers = await this.resolveLidPhoneNumbers(results.map((row) => row.remoteJid));
+
       const mappedResults = results.map((contact) => {
         const lastMessage = contact.lastMessageId
           ? {
@@ -835,10 +844,16 @@ export class ChannelStartupService {
             }
           : undefined;
 
+        const phoneNumber = lidPhoneNumbers.get(contact.remoteJid) ?? null;
+
         return {
           id: contact.contactId || null,
           remoteJid: contact.remoteJid,
-          pushName: contact.pushName,
+          // Ultimo recurso: el telefono equivalente del lid. Sin esto, un chat
+          // migrado a "@lid" y sin pushName se muestra como los 15 digitos
+          // opacos del lid, indistinguible del resto en el picker de privacidad.
+          pushName: contact.pushName || phoneNumber,
+          remoteJidAlt: phoneNumber ? `${phoneNumber}@s.whatsapp.net` : null,
           profilePicUrl: contact.profilePicUrl,
           updatedAt: contact.updatedAt,
           windowStart: contact.windowStart,
@@ -854,6 +869,46 @@ export class ChannelStartupService {
     }
 
     return [];
+  }
+
+  // WhatsApp entrega cada vez mas chats con el identificador opaco de privacidad
+  // ("204987654321098@lid"), que no es el telefono y no se deduce de el. En el
+  // picker de privacidad esos chats son indistinguibles entre si.
+  //
+  // saveOnWhatsappCache guarda todas las formas del mismo chat en
+  // IsOnWhatsapp.jidOptions (lista separada por comas) y deja el telefono en
+  // remoteJid, asi que el mapeo lid->telefono es recuperable. Una sola consulta
+  // por pagina de resultados, nunca una por fila: jidOptions no esta indexado.
+  private async resolveLidPhoneNumbers(remoteJids: string[]): Promise<Map<string, string>> {
+    const lidJids = [...new Set(remoteJids.filter((jid) => jid?.endsWith('@lid')))];
+    const resolved = new Map<string, string>();
+
+    if (lidJids.length === 0) {
+      return resolved;
+    }
+
+    try {
+      const rows = await this.prismaRepository.isOnWhatsapp.findMany({
+        where: { OR: lidJids.map((jid) => ({ jidOptions: { contains: jid } })) },
+        select: { remoteJid: true, jidOptions: true },
+      });
+
+      for (const jid of lidJids) {
+        // `contains` puede matchear de mas (un lid contenido en otro mas largo),
+        // asi que el match final se confirma contra la lista ya separada.
+        const match = rows.find((row) => row.jidOptions?.split(',').includes(jid));
+
+        if (match && !match.remoteJid.includes('@lid')) {
+          resolved.set(jid, match.remoteJid.split('@')[0]);
+        }
+      }
+    } catch (error) {
+      // Es solo una mejora de etiqueta: si falla, el chat sale con su lid crudo
+      // como antes en vez de tumbar el listado entero.
+      this.logger.warn(`Could not resolve phone numbers for lid jids: ${error}`);
+    }
+
+    return resolved;
   }
 
   public hasValidMediaContent(message: any): boolean {
