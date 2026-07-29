@@ -752,15 +752,25 @@ export class ChannelStartupService {
         AND "Message"."messageTimestamp" <= ${Math.floor(new Date(query.where.messageTimestamp.lte).getTime() / 1000)}`
         : Prisma.sql``;
 
+    // Buscar por telefono no encontraba los chats "@lid": ahi el remoteJid
+    // guardado es el identificador opaco, asi que el ILIKE contra remoteJid no
+    // matchea nunca. Se traducen primero los telefonos buscados a sus lids.
+    const searchTerm = query?.where?.pushName;
+    const lidJidsMatchingSearch = searchTerm ? await this.findLidJidsByNumber(searchTerm) : [];
+    const lidSearchFilter = lidJidsMatchingSearch.length
+      ? Prisma.sql`OR "Message"."key"->>'remoteJid' IN (${Prisma.join(lidJidsMatchingSearch)})`
+      : Prisma.sql``;
+
     // Busqueda por nombre: con miles de contactos no se puede mandar todo al
     // cliente, asi que el filtro corre en SQL antes del LIMIT/OFFSET.
-    const pushNameFilter = query?.where?.pushName
+    const pushNameFilter = searchTerm
       ? Prisma.sql`
         AND (
-          "Contact"."pushName" ILIKE ${'%' + query.where.pushName + '%'}
-          OR "Chat"."name" ILIKE ${'%' + query.where.pushName + '%'}
-          OR "Message"."pushName" ILIKE ${'%' + query.where.pushName + '%'}
-          OR "Message"."key"->>'remoteJid' ILIKE ${'%' + query.where.pushName + '%'}
+          "Contact"."pushName" ILIKE ${'%' + searchTerm + '%'}
+          OR "Chat"."name" ILIKE ${'%' + searchTerm + '%'}
+          OR "Message"."pushName" ILIKE ${'%' + searchTerm + '%'}
+          OR "Message"."key"->>'remoteJid' ILIKE ${'%' + searchTerm + '%'}
+          ${lidSearchFilter}
         )`
       : Prisma.sql``;
 
@@ -879,6 +889,33 @@ export class ChannelStartupService {
   // IsOnWhatsapp.jidOptions (lista separada por comas) y deja el telefono en
   // remoteJid, asi que el mapeo lid->telefono es recuperable. Una sola consulta
   // por pagina de resultados, nunca una por fila: jidOptions no esta indexado.
+  // Traduce un telefono buscado a los JIDs "@lid" del mismo chat, para que el
+  // buscador del picker encuentre por numero los contactos que WhatsApp migro a
+  // lid. Se exige un minimo de digitos para no escanear la tabla entera con
+  // terminos triviales, y el resultado va acotado.
+  private async findLidJidsByNumber(term: string): Promise<string[]> {
+    const digits = term.replace(/\D/g, '');
+
+    if (digits.length < 6) {
+      return [];
+    }
+
+    try {
+      const rows = await this.prismaRepository.isOnWhatsapp.findMany({
+        where: { jidOptions: { contains: digits } },
+        select: { jidOptions: true },
+        take: 50,
+      });
+
+      return [...new Set(rows.flatMap((row) => row.jidOptions?.split(',') ?? []))].filter((jid) =>
+        jid.endsWith('@lid'),
+      );
+    } catch (error) {
+      this.logger.warn(`Could not resolve lid jids for search term: ${error}`);
+      return [];
+    }
+  }
+
   private async resolveLidPhoneNumbers(remoteJids: string[]): Promise<Map<string, string>> {
     const lidJids = [...new Set(remoteJids.filter((jid) => jid?.endsWith('@lid')))];
     const resolved = new Map<string, string>();
