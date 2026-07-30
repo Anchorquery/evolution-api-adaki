@@ -847,7 +847,7 @@ export class BaileysStartupService extends ChannelStartupService {
           contacts.map(async (contact) => ({
             remoteJid: contact.id,
             pushName: contact?.name || contact?.verifiedName || contact.id.split('@')[0],
-            profilePicUrl: (await this.profilePicture(contact.id)).profilePictureUrl,
+            profilePicUrl: (await this.profilePictureBounded(contact.id)).profilePictureUrl,
             instanceId: this.instanceId,
           })),
         );
@@ -901,7 +901,7 @@ export class BaileysStartupService extends ChannelStartupService {
         contactsRaw.push({
           remoteJid: contact.id,
           pushName: contact?.name ?? contact?.verifiedName,
-          profilePicUrl: (await this.profilePicture(contact.id)).profilePictureUrl,
+          profilePicUrl: (await this.profilePictureBounded(contact.id)).profilePictureUrl,
           instanceId: this.instanceId,
         });
       }
@@ -1501,7 +1501,7 @@ export class BaileysStartupService extends ChannelStartupService {
           } = {
             remoteJid: received.key.remoteJid,
             pushName: received.key.fromMe ? '' : received.key.fromMe == null ? '' : received.pushName,
-            profilePicUrl: (await this.profilePicture(received.key.remoteJid)).profilePictureUrl,
+            profilePicUrl: (await this.profilePictureBounded(received.key.remoteJid)).profilePictureUrl,
             instanceId: this.instanceId,
           };
 
@@ -2052,6 +2052,24 @@ export class BaileysStartupService extends ChannelStartupService {
     } catch {
       return { wuid: jid, profilePictureUrl: null };
     }
+  }
+
+  // Variante con tope corto para los pipelines de eventos (messages.upsert,
+  // contacts.update/upsert), que procesan EN SERIE: la consulta de foto es un
+  // IQ a WhatsApp con timeout por defecto de 60s en Baileys y el error se traga
+  // en silencio, asi que una sesion con las queries degradadas (dispositivo
+  // recien vinculado, rate limit) hacia que cada mensaje esperara el timeout
+  // completo y la entrega a Chatwoot drenara a UN mensaje por minuto. La foto
+  // de perfil nunca vale eso: si no llega rapido, sale null y la proxima
+  // actualizacion del contacto la trae.
+  private async profilePictureBounded(number: string, timeoutMs = 3000) {
+    return Promise.race([
+      this.profilePicture(number),
+      new Promise<{ wuid: string; profilePictureUrl: null }>((resolve) => {
+        const timer = setTimeout(() => resolve({ wuid: createJid(number), profilePictureUrl: null }), timeoutMs);
+        timer.unref?.();
+      }),
+    ]);
   }
 
   public async getStatus(number: string) {
