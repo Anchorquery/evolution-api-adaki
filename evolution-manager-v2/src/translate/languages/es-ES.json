@@ -286,6 +286,10 @@
         "label": "Ignorar Grupos",
         "description": "Ignorar todos los mensajes de grupos"
       },
+      "newsletterIgnore": {
+        "label": "Ignorar Canales",
+        "description": "Ignorar todos los mensajes de canales de WhatsApp"
+      },
       "alwaysOnline": {
         "label": "Siempre Online",
         "description": "Permanecer siempre en línea"

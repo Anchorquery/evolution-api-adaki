@@ -130,7 +130,11 @@ export class InstanceController {
         readMessages: instanceData.readMessages === true,
         readStatus: instanceData.readStatus === true,
         syncFullHistory: instanceData.syncFullHistory === true,
-        newsletterIgnore: instanceData.newsletterIgnore !== false,
+        // A diferencia de sus hermanos (=== true, apagado salvo pedido), esto
+        // usaba !== false: cualquier instancia creada sin mandar el campo (el
+        // Manager no lo exponia como toggle) quedaba con canales bloqueados sin
+        // que nadie lo pidiera. Alineado al mismo patron que el resto.
+        newsletterIgnore: instanceData.newsletterIgnore === true,
         wavoipToken: instanceData.wavoipToken || '',
       };
 

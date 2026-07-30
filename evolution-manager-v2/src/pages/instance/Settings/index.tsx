@@ -107,6 +107,11 @@ function Settings() {
       description: t("settings.form.groupsIgnore.description"),
     },
     {
+      name: "newsletterIgnore",
+      label: t("settings.form.newsletterIgnore.label"),
+      description: t("settings.form.newsletterIgnore.description"),
+    },
+    {
       name: "alwaysOnline",
       label: t("settings.form.alwaysOnline.label"),
       description: t("settings.form.alwaysOnline.description"),

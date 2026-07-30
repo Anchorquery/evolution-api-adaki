@@ -329,6 +329,10 @@
         "label": "Ignore Groups",
         "description": "Ignore all messages from groups"
       },
+      "newsletterIgnore": {
+        "label": "Ignore Channels",
+        "description": "Ignore all messages from WhatsApp channels (newsletters)"
+      },
       "alwaysOnline": {
         "label": "Always Online",
         "description": "Keep the whatsapp always online"

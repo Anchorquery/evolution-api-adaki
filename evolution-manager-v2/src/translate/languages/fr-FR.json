@@ -285,6 +285,10 @@
         "label": "Ignorer les Groupes",
         "description": "Ignorer tous les messages de groupes"
       },
+      "newsletterIgnore": {
+        "label": "Ignorer les Chaînes",
+        "description": "Ignorer tous les messages des chaînes WhatsApp"
+      },
       "alwaysOnline": {
         "label": "Toujours En Ligne",
         "description": "Rester toujours en ligne"
