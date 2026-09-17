@@ -623,6 +623,27 @@ export class ChatwootService {
     return filterPayload;
   }
 
+  // Mismo problema y mismo tope (3s) que profilePictureBounded() en
+  // whatsapp.baileys.service.ts (commit 778519d): profilePicture() es un IQ a
+  // WhatsApp con timeout por defecto de 60s en Baileys. createConversation()
+  // lo espera de forma sincrona antes de crear/reenviar el mensaje a Chatwoot,
+  // asi que un contacto nuevo (@lid recien resuelto, sin cache) cuya query de
+  // foto se degrada hace que el PRIMER mensaje de esa conversacion tarde hasta
+  // un minuto en llegar a Chatwoot — el resto del pipeline (Captain incluido)
+  // nunca lo ve venir. Ese fix solo cubrio los call sites de
+  // BaileysStartupService (messages.upsert/contacts.update); este cubre el de
+  // ChatwootService, que ademas debe funcionar para cualquier tipo de canal
+  // (no solo Baileys), no solo el metodo privado de esa clase.
+  private async profilePictureBounded(instance: InstanceDto, number: string, timeoutMs = 3000) {
+    return Promise.race([
+      this.waMonitor.waInstances[instance.instanceName].profilePicture(number),
+      new Promise<{ wuid: string; profilePictureUrl: null }>((resolve) => {
+        const timer = setTimeout(() => resolve({ wuid: number, profilePictureUrl: null }), timeoutMs);
+        timer.unref?.();
+      }),
+    ]);
+  }
+
   public async createConversation(instance: InstanceDto, body: any) {
     const isLid = body.key.addressingMode === 'lid';
     const isGroup = body.key.remoteJid.endsWith('@g.us');
@@ -741,9 +762,7 @@ export class ChatwootService {
           const participantJid = isLid && !body.key.fromMe ? body.key.participantAlt : body.key.participant;
           nameContact = `${group.subject} (GROUP)`;
 
-          const picture_url = await this.waMonitor.waInstances[instance.instanceName].profilePicture(
-            participantJid.split('@')[0],
-          );
+          const picture_url = await this.profilePictureBounded(instance, participantJid.split('@')[0]);
           this.logger.verbose(`Participant profile picture URL: ${JSON.stringify(picture_url)}`);
 
           const findParticipant = await this.findContact(instance, participantJid.split('@')[0]);
@@ -771,7 +790,7 @@ export class ChatwootService {
           }
         }
 
-        const picture_url = await this.waMonitor.waInstances[instance.instanceName].profilePicture(chatId);
+        const picture_url = await this.profilePictureBounded(instance, chatId);
         this.logger.verbose(`Contact profile picture URL: ${JSON.stringify(picture_url)}`);
 
         this.logger.verbose(`Searching contact for: ${chatId}`);
