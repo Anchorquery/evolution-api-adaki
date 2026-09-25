@@ -1510,7 +1510,15 @@ export class ChatwootService {
         if (cwBotContact && (command.includes('init') || command.includes('iniciar'))) {
           const state = waInstance?.connectionStatus?.state;
 
-          if (state !== 'open') {
+          if (state === 'connecting') {
+            // Ya hay un socket negociando (reconexion automatica o QR pendiente). Crear otro
+            // dispara `conflict replaced` en bucle. Se espera al QR que ya esta en camino.
+            await this.createBotMessage(
+              instance,
+              'La instancia ya esta conectando. Espera el codigo QR y no envies `init` de nuevo.',
+              'incoming',
+            );
+          } else if (state !== 'open') {
             const number = command.split(':')[1];
             await waInstance.connectToWhatsapp(number);
           } else {

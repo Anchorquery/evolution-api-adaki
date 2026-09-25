@@ -252,6 +252,19 @@ export class BaileysStartupService extends ChannelStartupService {
   private logBaileys = this.configService.get<Log>('LOG').BAILEYS;
   private eventProcessingQueue: Promise<void> = Promise.resolve();
 
+  // Serializa createClient: dos llamadas concurrentes (reconexion automatica + comando
+  // `init` de Chatwoot, por ejemplo) no pueden dejar dos sockets vivos con las mismas
+  // credenciales. WhatsApp expulsa al viejo con `conflict replaced` y su handler crea otro,
+  // en bucle infinito.
+  private clientLock: Promise<unknown> = Promise.resolve();
+
+  // Marcas de tiempo de los ultimos `conflict replaced` (440) para cortar el bucle si otro
+  // dispositivo real (o un contenedor duplicado) disputa la sesion.
+  private replacedAt: number[] = [];
+  private static readonly RECONNECT_DELAY_MS = 3000;
+  private static readonly REPLACED_WINDOW_MS = 60_000;
+  private static readonly REPLACED_MAX_IN_WINDOW = 3;
+
   // Cache TTL constants (in seconds)
   private readonly MESSAGE_CACHE_TTL_SECONDS = 5 * 60; // 5 minutes - avoid duplicate message processing
   private readonly UPDATE_CACHE_TTL_SECONDS = 30 * 60; // 30 minutes - avoid duplicate status updates
@@ -331,7 +344,12 @@ export class BaileysStartupService extends ChannelStartupService {
     };
   }
 
-  private async connectionUpdate({ qr, connection, lastDisconnect }: Partial<ConnectionState>) {
+  // `sourceClient` es el socket que emitio el evento. Un `end()` manual (restart) emite `close` del
+  // socket viejo cuando this.client ya puede ser el nuevo; sin este dato se reconectaria dos veces.
+  private async connectionUpdate(
+    { qr, connection, lastDisconnect }: Partial<ConnectionState>,
+    sourceClient: WASocket = this.client,
+  ) {
     if (qr) {
       if (this.instance.qrcode.count === this.configService.get<QrCode>('QRCODE').LIMIT) {
         this.sendDataWebhook(Events.QRCODE_UPDATED, {
@@ -427,7 +445,49 @@ export class BaileysStartupService extends ChannelStartupService {
       const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
       const codesToNotReconnect = [DisconnectReason.loggedOut, DisconnectReason.forbidden, 402, 406];
       const shouldReconnect = !codesToNotReconnect.includes(statusCode);
+
+      if (statusCode === DisconnectReason.connectionReplaced) {
+        const now = Date.now();
+        this.replacedAt = this.replacedAt.filter((t) => now - t < BaileysStartupService.REPLACED_WINDOW_MS);
+        this.replacedAt.push(now);
+
+        if (this.replacedAt.length >= BaileysStartupService.REPLACED_MAX_IN_WINDOW) {
+          // Otro socket con las mismas credenciales sigue conectando (otro dispositivo, o un
+          // segundo proceso). Reconectar solo alimenta la pelea y arriesga un baneo del numero.
+          // No se llama a 'logout.instance': borraria la sesion. Queda en `close` para que un
+          // operador decida.
+          this.logger.error(
+            `Instance ${this.instance.name}: ${this.replacedAt.length} 'conflict replaced' in ` +
+              `${BaileysStartupService.REPLACED_WINDOW_MS / 1000}s, stopping automatic reconnection`,
+          );
+          this.replacedAt = [];
+          this.stateConnection = { state: 'close', statusReason: statusCode };
+
+          await this.prismaRepository.instance.update({
+            where: { id: this.instanceId },
+            data: {
+              connectionStatus: 'close',
+              disconnectionAt: new Date(),
+              disconnectionReasonCode: statusCode,
+              disconnectionObject: JSON.stringify(lastDisconnect),
+            },
+          });
+
+          this.sendDataWebhook(Events.CONNECTION_UPDATE, { instance: this.instance.name, ...this.stateConnection });
+          return;
+        }
+      }
+
       if (shouldReconnect) {
+        // Espera antes de reconectar y descarta la reconexion si mientras tanto otra ruta
+        // (comando `init`, restart) ya creo un socket nuevo.
+        await delay(BaileysStartupService.RECONNECT_DELAY_MS);
+
+        if (this.client !== sourceClient) {
+          this.logger.info(`Instance ${this.instance.name}: reconnection skipped, a newer socket already exists`);
+          return;
+        }
+
         await this.connectToWhatsapp(this.phoneNumber);
       } else {
         this.sendDataWebhook(Events.STATUS_INSTANCE, {
@@ -574,6 +634,43 @@ export class BaileysStartupService extends ChannelStartupService {
   }
 
   private async createClient(number?: string): Promise<WASocket> {
+    const run = this.clientLock.then(() => this.createClientLocked(number));
+    this.clientLock = run.catch(() => undefined);
+
+    return run;
+  }
+
+  // Cierra el socket anterior sin disparar reconexiones: sin esto, cada createClient dejaba
+  // el cliente viejo vivo y registrado en connectionUpdate.
+  private async teardownClient() {
+    const previous = this.client;
+
+    if (!previous) return;
+
+    try {
+      // `ev.process` (usado por eventHandler) escucha el evento interno 'event'.
+      (previous.ev as any).removeAllListeners('event');
+    } catch (error) {
+      this.logger.warn(`teardownClient removeAllListeners: ${error}`);
+    }
+
+    try {
+      previous.ws?.close();
+    } catch (error) {
+      this.logger.warn(`teardownClient ws.close: ${error}`);
+    }
+
+    try {
+      previous.end(undefined);
+    } catch (error) {
+      this.logger.warn(`teardownClient end: ${error}`);
+    }
+
+    // Da tiempo a que WhatsApp libere la sesion antes de abrir el socket nuevo.
+    await delay(500);
+  }
+
+  private async createClientLocked(number?: string): Promise<WASocket> {
     this.instance.authState = await this.defineAuthState();
 
     const session = this.configService.get<ConfigSessionPhone>('CONFIG_SESSION_PHONE');
@@ -692,6 +789,8 @@ export class BaileysStartupService extends ChannelStartupService {
         return message;
       },
     };
+
+    await this.teardownClient();
 
     this.endSession = false;
 
@@ -1873,7 +1972,12 @@ export class BaileysStartupService extends ChannelStartupService {
   };
 
   private eventHandler() {
-    this.client.ev.process(async (events) => {
+    const client = this.client;
+
+    client.ev.process(async (events) => {
+      // Un socket reemplazado no debe seguir moviendo el estado del servicio ni reconectar.
+      if (client !== this.client) return;
+
       this.eventProcessingQueue = this.eventProcessingQueue.then(async () => {
         try {
           if (!this.endSession) {
@@ -1900,7 +2004,7 @@ export class BaileysStartupService extends ChannelStartupService {
             }
 
             if (events['connection.update']) {
-              this.connectionUpdate(events['connection.update']);
+              this.connectionUpdate(events['connection.update'], client);
             }
 
             if (events['creds.update']) {
