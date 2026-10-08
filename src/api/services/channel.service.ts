@@ -21,6 +21,10 @@ import { v4 } from 'uuid';
 
 import { CacheService } from './cache.service';
 
+// Parte de usuario de un JID, sin dispositivo ni dominio:
+// "34600111222:12@s.whatsapp.net" -> "34600111222".
+const jidUser = (jid: string): string => String(jid).split('@')[0].split(':')[0];
+
 export class ChannelStartupService {
   constructor(
     public readonly configService: ConfigService,
@@ -971,9 +975,10 @@ export class ChannelStartupService {
         take: 50,
       });
 
-      return [...new Set(rows.flatMap((row) => row.jidOptions?.split(',') ?? []))].filter((jid) =>
-        jid.endsWith('@lid'),
-      );
+      const fromCache = rows.flatMap((row) => row.jidOptions?.split(',') ?? []).filter((jid) => jid.endsWith('@lid'));
+      // Un número completo (con prefijo) también se busca en la tabla de Baileys.
+      const fromBaileys = digits.length >= 8 ? await this.lidsForPhoneJids([`${digits}@s.whatsapp.net`]) : [];
+      return [...new Set([...fromCache, ...fromBaileys])];
     } catch (error) {
       this.logger.warn(`Could not resolve lid jids for search term: ${error}`);
       return [];
@@ -995,7 +1000,8 @@ export class ChannelStartupService {
         select: { lid: true },
       });
 
-      return rows.map((row) => row.lid).filter((lid): lid is string => !!lid && lid.endsWith('@lid'));
+      const fromCache = rows.map((row) => row.lid).filter((lid): lid is string => !!lid && lid.endsWith('@lid'));
+      return [...new Set([...fromCache, ...(await this.lidsForPhoneJids(phoneJids))])];
     } catch (error) {
       this.logger.warn(`Could not resolve lid jids for phone jids: ${error}`);
       return [];
@@ -1031,7 +1037,46 @@ export class ChannelStartupService {
       this.logger.warn(`Could not resolve phone numbers for lid jids: ${error}`);
     }
 
+    // IsOnWhatsapp solo conoce los números que alguien consultó. Baileys guarda
+    // su propia tabla lid <-> teléfono (la que aprende de cada mensaje y de la
+    // sincronización); sin ella, la misma persona salía dos veces en los
+    // pickers: una por su lid y otra por su teléfono.
+    const unresolved = lidJids.filter((jid) => !resolved.has(jid));
+    if (unresolved.length) {
+      const mappings = await this.lidMappingsForLids(unresolved);
+      for (const jid of unresolved) {
+        const phone = mappings.get(jidUser(jid));
+        if (phone) resolved.set(jid, phone);
+      }
+    }
+
     return resolved;
+  }
+
+  // { usuario del lid => teléfono } según Baileys. Si la sesión no está abierta
+  // o falla, devuelve un mapa vacío: es solo una mejora de etiqueta.
+  private async lidMappingsForLids(lidJids: string[]): Promise<Map<string, string>> {
+    const result = new Map<string, string>();
+    try {
+      const pairs = await this.client?.signalRepository?.lidMapping?.getPNsForLIDs(lidJids);
+      for (const pair of pairs ?? []) {
+        if (pair?.lid && pair?.pn) result.set(jidUser(pair.lid), jidUser(pair.pn));
+      }
+    } catch (error) {
+      this.logger.warn(`Could not read Baileys lid mappings: ${error}`);
+    }
+    return result;
+  }
+
+  // Lo inverso: los lids de una lista de JIDs de teléfono.
+  private async lidsForPhoneJids(phoneJids: string[]): Promise<string[]> {
+    try {
+      const pairs = await this.client?.signalRepository?.lidMapping?.getLIDsForPNs(phoneJids);
+      return (pairs ?? []).filter((pair) => pair?.lid).map((pair) => `${jidUser(pair.lid)}@lid`);
+    } catch (error) {
+      this.logger.warn(`Could not read Baileys lid mappings: ${error}`);
+      return [];
+    }
   }
 
   public hasValidMediaContent(message: any): boolean {
