@@ -529,9 +529,67 @@ export class ChannelStartupService {
       where['pushName'] = query.where.pushName;
     }
 
+    // `search` y `onlySaved` no son columnas de Contact: llegan sueltos en el
+    // where, de ahí el cast. pushName conserva su match exacto de siempre (lo
+    // usan otras integraciones); `search` es la búsqueda parcial para pickers.
+    const extraWhere = (query?.where ?? {}) as { search?: unknown; onlySaved?: unknown; remoteJids?: unknown };
+
+    // Búsqueda parcial en SQL, antes del LIMIT: con agendas de miles de
+    // contactos no se puede mandar todo al cliente para que filtre él.
+    // "juan" encuentra "Juan Pérez", "600 111" encuentra el número, y un
+    // teléfono también encuentra su contacto "@lid".
+    const search = typeof extraWhere.search === 'string' ? extraWhere.search.trim() : '';
+    if (search) {
+      const digits = search.replace(/\D/g, '');
+      const lidJids = await this.findLidJidsByNumber(search);
+      where['OR'] = [
+        { pushName: { contains: search, mode: 'insensitive' } },
+        ...(digits.length >= 4 ? [{ remoteJid: { contains: digits } }] : []),
+        ...(lidJids.length ? [{ remoteJid: { in: lidJids } }] : []),
+      ];
+    }
+
+    // Búsqueda por lotes (nombres de lo ya guardado en un filtro): una sola
+    // consulta para cientos de JIDs en vez de una llamada por contacto. Un
+    // teléfono cuyo contacto quedó guardado como "@lid" se busca también por
+    // ese lid; la fila vuelve con remoteJidAlt para casarla con el teléfono.
+    const remoteJids = Array.isArray(extraWhere.remoteJids)
+      ? extraWhere.remoteJids
+          .filter((jid): jid is string => typeof jid === 'string' && jid.length > 0)
+          .slice(0, 500)
+          .map((jid) => (jid.includes('@') ? jid : createJid(jid)))
+      : [];
+    if (remoteJids.length) {
+      const lidJids = await this.findLidJidsForPhoneJids(remoteJids);
+      where['remoteJid'] = { in: [...new Set([...remoteJids, ...lidJids])] };
+    }
+
+    // Solo personas de la agenda: fuera grupos, canales y los "miembros de
+    // grupo" que Baileys registra al ver un grupo (sin nombre ni foto; en
+    // números con muchos grupos son miles y taparían a los contactos reales).
+    // `not: ''` en SQL es `<> ''`, que además descarta los NULL.
+    if (extraWhere.onlySaved === true) {
+      where['AND'] = [
+        {
+          NOT: [
+            { remoteJid: { endsWith: '@g.us' } },
+            { remoteJid: { endsWith: '@newsletter' } },
+            { remoteJid: 'status@broadcast' },
+          ],
+        },
+        { OR: [{ pushName: { not: '' } }, { profilePicUrl: { not: '' } }] },
+      ];
+    }
+
     const contactFindManyArgs: Prisma.ContactFindManyArgs = {
       where,
     };
+
+    // Con búsqueda o paginación hace falta un orden estable: sin él, Postgres
+    // puede repetir o saltarse filas entre una página y la siguiente.
+    if (search || extraWhere.onlySaved === true || query.page) {
+      contactFindManyArgs.orderBy = [{ updatedAt: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }];
+    }
 
     if (query.offset) contactFindManyArgs.take = query.offset;
     if (query.page) {
@@ -540,14 +598,20 @@ export class ChannelStartupService {
     }
 
     const contacts = await this.prismaRepository.contact.findMany(contactFindManyArgs);
+    // Igual que en fetchChats: un contacto migrado a "@lid" lleva al lado su
+    // teléfono, que es lo que se reconoce y lo que compara el filtro de
+    // privacidad (remoteJidAlt). Solo consulta si hay algún lid en la página.
+    const lidPhoneNumbers = await this.resolveLidPhoneNumbers(contacts.map((contact) => contact.remoteJid));
 
     return contacts.map((contact) => {
       const remoteJid = contact.remoteJid;
       const isGroup = remoteJid.endsWith('@g.us');
       const isSaved = !!contact.pushName || !!contact.profilePicUrl;
       const type = isGroup ? 'group' : isSaved ? 'contact' : 'group_member';
+      const phoneNumber = lidPhoneNumbers.get(remoteJid) ?? null;
       return {
         ...contact,
+        remoteJidAlt: phoneNumber ? `${phoneNumber}@s.whatsapp.net` : null,
         isGroup,
         isSaved,
         type,
@@ -912,6 +976,28 @@ export class ChannelStartupService {
       );
     } catch (error) {
       this.logger.warn(`Could not resolve lid jids for search term: ${error}`);
+      return [];
+    }
+  }
+
+  // Los lids de una lista de JIDs de teléfono, según lo que Baileys aprendió
+  // al consultar esos números (IsOnWhatsapp.lid).
+  private async findLidJidsForPhoneJids(remoteJids: string[]): Promise<string[]> {
+    const phoneJids = remoteJids.filter((jid) => jid.endsWith('@s.whatsapp.net'));
+
+    if (phoneJids.length === 0) {
+      return [];
+    }
+
+    try {
+      const rows = await this.prismaRepository.isOnWhatsapp.findMany({
+        where: { remoteJid: { in: phoneJids }, lid: { not: null } },
+        select: { lid: true },
+      });
+
+      return rows.map((row) => row.lid).filter((lid): lid is string => !!lid && lid.endsWith('@lid'));
+    } catch (error) {
+      this.logger.warn(`Could not resolve lid jids for phone jids: ${error}`);
       return [];
     }
   }
