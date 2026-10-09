@@ -1592,6 +1592,11 @@ export class BaileysStartupService extends ChannelStartupService {
             where: { remoteJid: received.key.remoteJid, instanceId: this.instanceId },
           });
 
+          // Un mensaje propio trae NUESTRO pushName, no el del contacto: antes se
+          // guardaba '' y pisaba el nombre que ya teníamos de esa persona, así
+          // que responder a alguien lo convertía en "contacto sin nombre". Se
+          // conserva el nombre conocido cuando el mensaje no aporta uno.
+          const incomingPushName = received.key.fromMe ? '' : received.key.fromMe == null ? '' : received.pushName;
           const contactRaw: {
             remoteJid: string;
             pushName: string;
@@ -1599,7 +1604,7 @@ export class BaileysStartupService extends ChannelStartupService {
             instanceId: string;
           } = {
             remoteJid: received.key.remoteJid,
-            pushName: received.key.fromMe ? '' : received.key.fromMe == null ? '' : received.pushName,
+            pushName: incomingPushName || contact?.pushName || '',
             profilePicUrl: (await this.profilePictureBounded(received.key.remoteJid)).profilePictureUrl,
             instanceId: this.instanceId,
           };
