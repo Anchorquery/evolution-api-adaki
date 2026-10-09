@@ -568,9 +568,11 @@ export class ChannelStartupService {
       where['remoteJid'] = { in: [...new Set([...remoteJids, ...lidJids])] };
     }
 
-    // Solo personas de la agenda: fuera grupos, canales y los "miembros de
-    // grupo" que Baileys registra al ver un grupo (sin nombre ni foto; en
-    // números con muchos grupos son miles y taparían a los contactos reales).
+    // Solo personas reconocibles: fuera grupos, canales y las filas que
+    // Evolution crea por cada chat visto sin saber quién es. Desde que WhatsApp
+    // oculta el teléfono de quien no está agendado ("@lid"), esas filas llegan
+    // con foto de perfil pero sin nombre ni número: en un picker no hay forma
+    // de saber a quién se bloquea. Por eso cuenta el nombre, no la foto.
     // `not: ''` en SQL es `<> ''`, que además descarta los NULL.
     if (extraWhere.onlySaved === true) {
       where['AND'] = [
@@ -581,7 +583,7 @@ export class ChannelStartupService {
             { remoteJid: 'status@broadcast' },
           ],
         },
-        { OR: [{ pushName: { not: '' } }, { profilePicUrl: { not: '' } }] },
+        { pushName: { not: '' } },
       ];
     }
 
