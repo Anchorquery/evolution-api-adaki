@@ -833,12 +833,20 @@ export class ChannelStartupService {
 
     // Busqueda por nombre: con miles de contactos no se puede mandar todo al
     // cliente, asi que el filtro corre en SQL antes del LIMIT/OFFSET.
+    //
+    // Un mensaje propio (fromMe) lleva NUESTRO pushName, no el del contacto:
+    // buscar el nombre del negocio devolvia todos los chats a los que alguna
+    // vez respondimos, cada uno rotulado con ese nombre. Solo cuentan los
+    // mensajes recibidos.
     const pushNameFilter = searchTerm
       ? Prisma.sql`
         AND (
           "Contact"."pushName" ILIKE ${'%' + searchTerm + '%'}
           OR "Chat"."name" ILIKE ${'%' + searchTerm + '%'}
-          OR "Message"."pushName" ILIKE ${'%' + searchTerm + '%'}
+          OR (
+            "Message"."key"->>'fromMe' IS DISTINCT FROM 'true'
+            AND "Message"."pushName" ILIKE ${'%' + searchTerm + '%'}
+          )
           OR "Message"."key"->>'remoteJid' ILIKE ${'%' + searchTerm + '%'}
           ${lidSearchFilter}
         )`
@@ -860,9 +868,16 @@ export class ChannelStartupService {
           -- el nombre siempre acababa siendo Chat.name — NULL en chats 1:1, donde
           -- el nombre vive en Contact.pushName. Resultado: los pickers de
           -- privacidad mostraban el numero crudo del JID en vez del nombre.
+          -- El pushName de un mensaje propio es el nuestro: si el ultimo mensaje
+          -- del chat lo enviamos nosotros, el chat salia con el nombre del
+          -- negocio. Y '' no es NULL: sin NULLIF, un contacto guardado con
+          -- nombre vacio tapaba el respaldo.
           CASE
             WHEN "Message"."key"->>'remoteJid' LIKE '%@g.us' THEN COALESCE("Chat"."name", "Contact"."pushName")
-            ELSE COALESCE("Contact"."pushName", "Message"."pushName")
+            ELSE COALESCE(
+              NULLIF("Contact"."pushName", ''),
+              CASE WHEN "Message"."key"->>'fromMe' = 'true' THEN NULL ELSE NULLIF("Message"."pushName", '') END
+            )
           END as "pushName",
           "Contact"."profilePicUrl",
           COALESCE(
