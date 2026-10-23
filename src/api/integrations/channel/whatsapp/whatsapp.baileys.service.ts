@@ -2870,7 +2870,7 @@ export class BaileysStartupService extends ChannelStartupService {
     return statusSent;
   }
 
-  private async prepareMediaMessage(mediaMessage: MediaMessage) {
+  private async prepareMediaMessage(mediaMessage: MediaMessage, number?: string) {
     try {
       const type = mediaMessage.mediatype === 'ptv' ? 'video' : mediaMessage.mediatype;
 
@@ -2908,11 +2908,16 @@ export class BaileysStartupService extends ChannelStartupService {
           : Buffer.from(mediaMessage.media, 'base64');
       }
 
+      // Los canales (@newsletter) no admiten media cifrada como los chats: Baileys
+      // solo la sube "en crudo" si sabe que el destino es un canal. Sin el jid la
+      // imagen se subía cifrada y la publicación no aparecía en el canal, aunque
+      // el texto solo sí llegaba.
+      const jid = number ? createJid(number) : undefined;
       const prepareMedia = await prepareWAMessageMedia(
         {
           [type]: mediaInput,
         } as any,
-        { upload: this.client.waUploadToServer },
+        { upload: this.client.waUploadToServer, ...(jid && isJidNewsletter(jid) ? { jid } : {}) },
       );
 
       const mediaType = mediaMessage.mediatype + 'Message';
@@ -3110,7 +3115,7 @@ export class BaileysStartupService extends ChannelStartupService {
 
     if (file) mediaData.media = file.buffer.toString('base64');
 
-    const generate = await this.prepareMediaMessage(mediaData);
+    const generate = await this.prepareMediaMessage(mediaData, data.number);
 
     const mediaSent = await this.sendMessageWithTyping(
       data.number,
@@ -3141,7 +3146,7 @@ export class BaileysStartupService extends ChannelStartupService {
 
     if (file) mediaData.media = file.buffer.toString('base64');
 
-    const generate = await this.prepareMediaMessage(mediaData);
+    const generate = await this.prepareMediaMessage(mediaData, data.number);
 
     const mediaSent = await this.sendMessageWithTyping(
       data.number,

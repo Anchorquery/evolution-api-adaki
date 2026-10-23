@@ -38,7 +38,9 @@ export class ChatwootRouter extends RouterBroker {
           execute: (instance, data) => chatwootController.receiveWebhook(instance, data),
         });
 
-        res.status(HttpStatus.OK).json(response);
+        // 500 cuando no se pudo enviar un mensaje nuevo: así Chatwoot lo marca como
+        // fallido en vez de darlo por enviado.
+        res.status(response?.failed ? HttpStatus.INTERNAL_SERVER_ERROR : HttpStatus.OK).json(response);
       })
       .post(this.routerPath('syncNewsletter'), ...guards, async (req, res) => {
         const response = await this.dataValidate<ChatwootNewsletterSyncDto>({

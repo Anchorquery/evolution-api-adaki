@@ -1621,8 +1621,11 @@ export class ChatwootService {
                 formatText,
                 options,
               );
-              if (!messageSent && body.conversation?.id) {
-                this.onSendMessageError(instance, body.conversation?.id);
+              if (!messageSent) {
+                if (body.conversation?.id) this.onSendMessageError(instance, body.conversation?.id);
+                // Igual que el texto: sin esto el fallo no salía de aquí y Chatwoot
+                // recibía 200, así que daba el adjunto por enviado.
+                throw new Error('Attachment not sent');
               }
 
               await this.updateChatwootMessageId(
@@ -1741,7 +1744,9 @@ export class ChatwootService {
     } catch (error) {
       this.logger.error(error);
 
-      return { message: 'bot' };
+      // Un mensaje nuevo que no se pudo enviar responde con error (ver el router):
+      // con 200 Chatwoot lo daba por enviado y una campaña lo contaba como entregado.
+      return { message: 'bot', failed: body?.event === 'message_created' };
     }
   }
 
