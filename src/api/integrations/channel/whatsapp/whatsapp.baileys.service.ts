@@ -1700,6 +1700,20 @@ export class BaileysStartupService extends ChannelStartupService {
           }
         }
 
+        // Baileys emite status ERROR cuando el servidor rechaza el envío con un
+        // NACK (p. ej. 463: cuenta restringida para iniciar chats nuevos). Llega
+        // después de que el envío "terminó bien", así que Chatwoot mostraría el
+        // mensaje como enviado si no se lo contamos.
+        if (status[update.status] === 'ERROR' && key.fromMe) {
+          if (this.configService.get<Chatwoot>('CHATWOOT').ENABLED && this.localChatwoot?.enabled) {
+            this.chatwootService.eventWhatsapp(
+              'messages.error',
+              { instanceName: this.instance.name, instanceId: this.instanceId },
+              { key: key, errorCode: update.messageStubParameters?.[0] },
+            );
+          }
+        }
+
         if (key.remoteJid !== 'status@broadcast' && key.id !== undefined) {
           let pollUpdates: any;
 
