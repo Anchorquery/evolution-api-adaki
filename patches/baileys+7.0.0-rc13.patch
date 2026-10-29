@@ -1,0 +1,118 @@
+diff --git a/node_modules/baileys/lib/Defaults/index.js b/node_modules/baileys/lib/Defaults/index.js
+index ef16578..30bd5c5 100644
+--- a/node_modules/baileys/lib/Defaults/index.js
++++ b/node_modules/baileys/lib/Defaults/index.js
+@@ -93,6 +93,16 @@ export const MEDIA_PATH_MAP = {
+     'md-msg-hist': '/mms/md-app-state',
+     'biz-cover-photo': '/pps/biz-cover-photo'
+ };
++// Channel (newsletter) media must go to these paths: uploaded to /mms/* the server
++// returns an /o1/ directPath and rejects the post with ACK error 479.
++export const NEWSLETTER_MEDIA_PATH_MAP = {
++    image: '/newsletter/newsletter-image',
++    video: '/newsletter/newsletter-video',
++    document: '/newsletter/newsletter-document',
++    audio: '/newsletter/newsletter-audio',
++    sticker: '/newsletter/newsletter-image',
++    'thumbnail-link': '/newsletter/newsletter-image'
++};
+ export const MEDIA_HKDF_KEY_MAPPING = {
+     audio: 'Audio',
+     document: 'Document',
+diff --git a/node_modules/baileys/lib/Socket/messages-send.js b/node_modules/baileys/lib/Socket/messages-send.js
+index d61e064..64e8054 100644
+--- a/node_modules/baileys/lib/Socket/messages-send.js
++++ b/node_modules/baileys/lib/Socket/messages-send.js
+@@ -475,7 +475,7 @@ export const makeMessagesSocket = (config) => {
+                 const bytes = encodeNewsletterMessage(patched);
+                 binaryNodeContent.push({
+                     tag: 'plaintext',
+-                    attrs: {},
++                    attrs: mediaType ? { mediatype: mediaType } : {},
+                     content: bytes
+                 });
+                 const stanza = {
+diff --git a/node_modules/baileys/lib/Utils/messages-media.js b/node_modules/baileys/lib/Utils/messages-media.js
+index a3d2fa6..4a397f9 100644
+--- a/node_modules/baileys/lib/Utils/messages-media.js
++++ b/node_modules/baileys/lib/Utils/messages-media.js
+@@ -8,7 +8,7 @@ import { join } from 'path';
+ import { Readable, Transform } from 'stream';
+ import { URL } from 'url';
+ import { proto } from '../../WAProto/index.js';
+-import { DEFAULT_ORIGIN, MEDIA_HKDF_KEY_MAPPING, MEDIA_PATH_MAP } from '../Defaults/index.js';
++import { DEFAULT_ORIGIN, MEDIA_HKDF_KEY_MAPPING, MEDIA_PATH_MAP, NEWSLETTER_MEDIA_PATH_MAP } from '../Defaults/index.js';
+ import { getBinaryNodeChild, getBinaryNodeChildBuffer, jidNormalizedUser } from '../WABinary/index.js';
+ import { aesDecryptGCM, aesEncryptGCM, hkdf } from './crypto.js';
+ import { generateMessageIDV2 } from './generics.js';
+@@ -641,7 +641,7 @@ const uploadMedia = async (params, logger) => {
+     }
+ };
+ export const getWAUploadToServer = ({ customUploadHosts, fetchAgent, logger, options }, refreshMediaConn) => {
+-    return async (filePath, { mediaType, fileEncSha256B64, timeoutMs }) => {
++    return async (filePath, { mediaType, fileEncSha256B64, timeoutMs, newsletter }) => {
+         // send a query JSON to obtain the url & auth token to upload our media
+         let uploadInfo = await refreshMediaConn(false);
+         let urls;
+@@ -662,7 +662,14 @@ export const getWAUploadToServer = ({ customUploadHosts, fetchAgent, logger, opt
+         for (const { hostname } of hosts) {
+             logger.debug(`uploading to "${hostname}"`);
+             const auth = encodeURIComponent(uploadInfo.auth);
+-            const url = `https://${hostname}${MEDIA_PATH_MAP[mediaType]}/${fileEncSha256B64}?auth=${auth}&token=${fileEncSha256B64}`;
++            const mediaPath = (newsletter ? NEWSLETTER_MEDIA_PATH_MAP[mediaType] : undefined) || MEDIA_PATH_MAP[mediaType];
++            let url = `https://${hostname}${mediaPath}/${fileEncSha256B64}?auth=${auth}&token=${fileEncSha256B64}`;
++            if (newsletter) {
++                url += '&server_thumb_gen=1';
++                if (mediaType === 'video') {
++                    url += '&server_transcode=1';
++                }
++            }
+             let result;
+             try {
+                 result = await uploadMedia({
+@@ -674,11 +681,13 @@ export const getWAUploadToServer = ({ customUploadHosts, fetchAgent, logger, opt
+                 }, logger);
+                 if (result?.url || result?.direct_path) {
+                     urls = {
+-                        mediaUrl: result.url,
++                        mediaUrl: result.url || result.direct_path,
+                         directPath: result.direct_path,
+                         meta_hmac: result.meta_hmac,
+                         fbid: result.fbid,
+-                        ts: result.ts
++                        ts: result.ts,
++                        thumbnailDirectPath: result.thumbnail_info?.thumbnail_direct_path,
++                        thumbnailSha256: result.thumbnail_info?.thumbnail_sha256
+                     };
+                     break;
+                 }
+diff --git a/node_modules/baileys/lib/Utils/messages.js b/node_modules/baileys/lib/Utils/messages.js
+index 247b1f1..c662082 100644
+--- a/node_modules/baileys/lib/Utils/messages.js
++++ b/node_modules/baileys/lib/Utils/messages.js
+@@ -101,19 +101,22 @@ export const prepareWAMessageMedia = async (message, options) => {
+         logger?.info({ key: cacheableKey }, 'Preparing raw media for newsletter');
+         const { filePath, fileSha256, fileLength } = await getRawMediaUploadData(uploadData.media, options.mediaTypeOverride || mediaType, logger);
+         const fileSha256B64 = fileSha256.toString('base64');
+-        const { mediaUrl, directPath } = await options.upload(filePath, {
++        const { directPath, thumbnailDirectPath, thumbnailSha256 } = await options.upload(filePath, {
+             fileEncSha256B64: fileSha256B64,
+             mediaType: mediaType,
+-            timeoutMs: options.mediaUploadTimeoutMs
++            timeoutMs: options.mediaUploadTimeoutMs,
++            newsletter: true
+         });
+         await fs.unlink(filePath);
+         const obj = WAProto.Message.fromObject({
+             // todo: add more support here
+             [`${mediaType}Message`]: MessageTypeProto[mediaType].fromObject({
+-                url: mediaUrl,
++                // channels use the directPath only, like the official client
+                 directPath,
+                 fileSha256,
+                 fileLength,
++                thumbnailDirectPath,
++                thumbnailSha256: thumbnailSha256 ? Buffer.from(thumbnailSha256, 'base64') : undefined,
+                 ...uploadData,
+                 media: undefined
+             })
