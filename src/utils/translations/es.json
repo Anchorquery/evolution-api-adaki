@@ -23,5 +23,7 @@
   "cw.contactMessage.number": "Numero",
   "cw.message.notsent": "🚨 El mensaje no se pudo enviar. Comprueba tu conexión. {{error}}",
   "cw.message.numbernotinwhatsapp": "🚨 El mensaje no fue enviado porque el contacto no es un número de Whatsapp válido.",
-  "cw.message.edited": "Mensaje editado"
+  "cw.message.edited": "Mensaje editado",
+  "cw.message.restricted": "WhatsApp rechazó el mensaje (463): la cuenta no puede iniciar chats nuevos con este contacto. No se reintenta.",
+  "cw.message.rejected": "WhatsApp rechazó el mensaje (código {{code}})."
 }

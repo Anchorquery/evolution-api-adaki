@@ -2536,6 +2536,47 @@ export class ChatwootService {
         return;
       }
 
+      if (event === 'messages.error') {
+        if (!body?.key?.id) {
+          this.logger.warn('message id not found');
+          return;
+        }
+
+        // El NACK puede llegar antes de que receiveWebhook guarde el mensaje o
+        // su id de Chatwoot (un adjunto grande tarda en subirse): se reintenta
+        // con espera creciente.
+        let message = await this.getMessageByKeyId(instance, body.key.id);
+        for (const delayMs of [2000, 5000, 15000]) {
+          if (message?.chatwootMessageId) break;
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          message = await this.getMessageByKeyId(instance, body.key.id);
+        }
+
+        if (!message?.chatwootMessageId || !message?.chatwootConversationId) {
+          this.logger.warn(`messages.error: chatwoot message not found for ${body.key.id}`);
+          return;
+        }
+
+        const errorCode = body.errorCode ? String(body.errorCode) : 'unknown';
+        const externalError =
+          errorCode === '463'
+            ? i18next.t('cw.message.restricted')
+            : i18next.t('cw.message.rejected', { code: errorCode });
+
+        try {
+          await chatwootRequest(this.getClientCwConfig(), {
+            method: 'PATCH',
+            url:
+              `/api/v1/accounts/${this.provider.accountId}/conversations/${message.chatwootConversationId}` +
+              `/messages/${message.chatwootMessageId}`,
+            body: { status: 'failed', external_error: externalError },
+          });
+        } catch (error) {
+          this.logger.error(`messages.error: failed to mark chatwoot message as failed: ${error}`);
+        }
+        return;
+      }
+
       if (event === 'messages.read') {
         if (!body?.key?.id || !body?.key?.remoteJid) {
           this.logger.warn('message id not found');
