@@ -2542,11 +2542,13 @@ export class ChatwootService {
           return;
         }
 
-        // El NACK puede llegar antes de que receiveWebhook guarde el id de
-        // Chatwoot en el mensaje: un segundo intento cubre esa carrera.
+        // El NACK puede llegar antes de que receiveWebhook guarde el mensaje o
+        // su id de Chatwoot (un adjunto grande tarda en subirse): se reintenta
+        // con espera creciente.
         let message = await this.getMessageByKeyId(instance, body.key.id);
-        if (message && !message.chatwootMessageId) {
-          await new Promise((resolve) => setTimeout(resolve, 3000));
+        for (const delayMs of [2000, 5000, 15000]) {
+          if (message?.chatwootMessageId) break;
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
           message = await this.getMessageByKeyId(instance, body.key.id);
         }
 
