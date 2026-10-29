@@ -3013,8 +3013,11 @@ export class BaileysStartupService extends ChannelStartupService {
         }
       }
 
-      if (mediaMessage?.fileName) {
-        mimetype = mimeTypes.lookup(mediaMessage.fileName).toString();
+      // Las imágenes ya se convirtieron a JPEG arriba. Con un nombre sin extensión
+      // conocida lookup() devuelve false y se enviaba mimetype "false".
+      const mimetypeFromName = mediaMessage?.fileName && mimeTypes.lookup(mediaMessage.fileName);
+      if (mimetypeFromName && mediaMessage.mediatype !== 'image') {
+        mimetype = mimetypeFromName;
         if (mimetype === 'application/mp4') {
           mimetype = 'video/mp4';
         }
