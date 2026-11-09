@@ -58,4 +58,9 @@ ENV DOCKER_ENV=true
 
 EXPOSE 8080
 
+# busybox wget ships with node:alpine; start-period covers the Prisma migrations
+# that deploy_database.sh runs before the server listens.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --start-interval=5s --retries=3 \
+  CMD wget -q -O /dev/null "http://127.0.0.1:${SERVER_PORT:-8080}/health" || exit 1
+
 ENTRYPOINT ["/bin/bash", "-c", ". ./Docker/scripts/deploy_database.sh && npm run start:prod" ]

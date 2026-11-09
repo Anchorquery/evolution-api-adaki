@@ -44,6 +44,14 @@ async function bootstrap() {
   const prismaRepository = new PrismaRepository(configService);
   await prismaRepository.onModuleInit();
 
+  // Liveness probe for the container HEALTHCHECK. Mounted before CORS (which
+  // rejects requests without an Origin unless CORS_ORIGIN is "*"), auth and
+  // telemetry, and kept free of outbound calls: "/" fetches the latest
+  // WhatsApp Web version on every request.
+  app.get('/health', (req, res) => {
+    res.status(HttpStatus.OK).json({ status: 'ok' });
+  });
+
   app.use(
     cors({
       origin(requestOrigin, callback) {
