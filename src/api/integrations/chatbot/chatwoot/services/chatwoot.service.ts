@@ -1513,6 +1513,7 @@ export class ChatwootService {
           if (state === 'connecting') {
             // Ya hay un socket negociando (reconexion automatica o QR pendiente). Crear otro
             // dispara `conflict replaced` en bucle. Se espera al QR que ya esta en camino.
+            waInstance.requestQrCode?.();
             await this.createBotMessage(
               instance,
               'La instancia ya esta conectando. Espera el codigo QR y no envies `init` de nuevo.',
@@ -1520,6 +1521,7 @@ export class ChatwootService {
             );
           } else if (state !== 'open') {
             const number = command.split(':')[1];
+            waInstance.requestQrCode?.();
             await waInstance.connectToWhatsapp(number);
           } else {
             await this.createBotMessage(

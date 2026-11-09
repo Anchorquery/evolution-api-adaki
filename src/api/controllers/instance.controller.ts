@@ -156,6 +156,7 @@ export class InstanceController {
         let getQrcode: wa.QrCode;
 
         if (instanceData.qrcode && instanceData.integration === Integration.WHATSAPP_BAILEYS) {
+          (instance as { requestQrCode?: () => void }).requestQrCode?.();
           await instance.connectToWhatsapp(instanceData.number);
           await delay(5000);
           getQrcode = instance.qrCode;
@@ -324,11 +325,14 @@ export class InstanceController {
         return await this.connectionState({ instanceName });
       }
 
+      // Pedir el QR aqui es lo unico que autoriza a Baileys a emitirlo (ver requestQrCode).
       if (state == 'connecting') {
+        instance.requestQrCode?.();
         return instance.qrCode;
       }
 
       if (state == 'close') {
+        instance.requestQrCode?.();
         await instance.connectToWhatsapp(number);
 
         await delay(2000);
