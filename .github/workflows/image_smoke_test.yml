@@ -1,0 +1,110 @@
+name: Image smoke test
+
+# Builds the image from this PR, starts it against a throwaway Postgres and
+# Redis, and fails unless the Dockerfile HEALTHCHECK reports "healthy" and
+# /health answers.
+#
+# Why: Coolify marks a deploy as finished without waiting for health checks,
+# and Traefik does not route to a container whose check has not passed. A
+# HEALTHCHECK that cannot run in the image (missing binary, wrong port, route
+# behind CORS or auth) would take the API down while Coolify reports success.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'Dockerfile'
+      - 'Docker/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'prisma/**'
+      - 'src/main.ts'
+      - 'src/config/**'
+      - '.github/workflows/image_smoke_test.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      IMAGE: evolution-api-adaki:smoke
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: ${{ env.IMAGE }}
+          cache-from: type=gha
+
+      - name: Start Postgres and Redis
+        run: |
+          docker network create smoke
+          docker run -d --name postgres --network smoke \
+            -e POSTGRES_USER=evolution -e POSTGRES_PASSWORD=evolution -e POSTGRES_DB=evolution \
+            --health-cmd 'pg_isready -U evolution' --health-interval 2s --health-retries 30 \
+            postgres:16-alpine
+          docker run -d --name redis --network smoke redis:7-alpine
+          for i in $(seq 1 30); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' postgres)" = healthy ] && break
+            sleep 2
+          done
+
+      - name: Start the API
+        # Default "public" schema, as in production: a fork migration names
+        # public."Chatwoot" explicitly. CORS_ORIGIN is deliberately not "*": the
+        # probe sends no Origin header,
+        # so /health must not depend on the CORS setting.
+        run: |
+          docker run -d --name api --network smoke \
+            -e SERVER_URL=http://localhost:8080 \
+            -e AUTHENTICATION_API_KEY=smoke-test-key \
+            -e CORS_ORIGIN=https://example.invalid \
+            -e DATABASE_PROVIDER=postgresql \
+            -e DATABASE_CONNECTION_URI='postgresql://evolution:evolution@postgres:5432/evolution' \
+            -e DATABASE_CONNECTION_CLIENT_NAME=smoke \
+            -e CACHE_REDIS_ENABLED=true \
+            -e CACHE_REDIS_URI=redis://redis:6379/6 \
+            -e CACHE_LOCAL_ENABLED=false \
+            -e TELEMETRY_ENABLED=false \
+            "$IMAGE"
+
+      - name: Wait for the HEALTHCHECK to report healthy
+        run: |
+          for i in $(seq 1 60); do
+            status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' api)
+            running=$(docker inspect -f '{{.State.Running}}' api)
+            echo "$(date -u +%T) running=$running health=$status"
+            [ "$status" = healthy ] && exit 0
+            [ "$status" = none ] && { echo "image has no HEALTHCHECK"; exit 1; }
+            [ "$status" = unhealthy ] && exit 1
+            [ "$running" = false ] && exit 1
+            sleep 5
+          done
+          echo "timed out waiting for healthy"
+          exit 1
+
+      - name: /health answers inside the container
+        run: docker exec api wget -q -O - "http://127.0.0.1:8080/health"
+
+      - name: Diagnostics
+        if: failure()
+        run: |
+          docker inspect -f '{{json .State.Health}}' api || true
+          docker logs --tail 200 api || true
+
+      - name: Tear down
+        if: always()
+        run: docker rm -f api postgres redis || true
