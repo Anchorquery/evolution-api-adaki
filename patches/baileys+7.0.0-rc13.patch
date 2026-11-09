@@ -19,6 +19,50 @@ index ef16578..30bd5c5 100644
  export const MEDIA_HKDF_KEY_MAPPING = {
      audio: 'Audio',
      document: 'Document',
+diff --git a/node_modules/baileys/lib/Socket/messages-recv.js b/node_modules/baileys/lib/Socket/messages-recv.js
+index f2003ac..f1e99e0 100644
+--- a/node_modules/baileys/lib/Socket/messages-recv.js
++++ b/node_modules/baileys/lib/Socket/messages-recv.js
+@@ -1566,6 +1566,19 @@ export const makeMessagesRecvSocket = (config) => {
+             ]);
+         }
+     };
++    // WhatsApp now delivers contacts' statuses as top-level <status> stanzas.
++    // Without an ack the server ends the stream ~50 min later
++    // (stream:error <ack class="status">) and holds back inbound messages
++    // meanwhile. Ack only: the stanza is not decoded (backport of
++    // WhiskeySockets/Baileys#2883).
++    const handleStatus = async (node) => {
++        try {
++            await sendMessageAck(node);
++        }
++        catch (error) {
++            onUnexpectedError(error, 'acking status stanza');
++        }
++    };
+     /// processes a node with the given function
+     /// and adds the task to the existing buffer if we're buffering events
+     const processNodeWithBuffer = async (node, identifier, exec) => {
+@@ -1580,7 +1593,8 @@ export const makeMessagesRecvSocket = (config) => {
+         ['message', handleMessage],
+         ['call', handleCall],
+         ['receipt', handleReceipt],
+-        ['notification', handleNotification]
++        ['notification', handleNotification],
++        ['status', handleStatus]
+     ]), {
+         isWsOpen: () => ws.isOpen,
+         onUnexpectedError,
+@@ -1621,6 +1635,9 @@ export const makeMessagesRecvSocket = (config) => {
+     ws.on('CB:notification', async (node) => {
+         await processNode('notification', node, 'handling notification', handleNotification);
+     });
++    ws.on('CB:status', async (node) => {
++        await processNode('status', node, 'acking status stanza', handleStatus);
++    });
+     ws.on('CB:ack,class:message', (node) => {
+         handleBadAck(node).catch(error => onUnexpectedError(error, 'handling bad ack'));
+     });
 diff --git a/node_modules/baileys/lib/Socket/messages-send.js b/node_modules/baileys/lib/Socket/messages-send.js
 index d61e064..64e8054 100644
 --- a/node_modules/baileys/lib/Socket/messages-send.js
