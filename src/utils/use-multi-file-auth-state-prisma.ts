@@ -7,6 +7,8 @@ import { AuthenticationState, BufferJSON, initAuthCreds, WAProto as proto } from
 import fs from 'fs/promises';
 import path from 'path';
 
+const logger = new Logger('useMultiFileAuthStatePrisma');
+
 const fixFileName = (file: string): string | undefined => {
   if (!file) {
     return undefined;
@@ -26,33 +28,27 @@ export async function keyExists(sessionId: string): Promise<any> {
 }
 
 export async function saveKey(sessionId: string, keyJson: any): Promise<any> {
-  const exists = await keyExists(sessionId);
+  // upsert: con exists + create/update, un fallo de keyExists se leia como "no existe" y el
+  // create chocaba con la fila existente, perdiendo la actualizacion sin dejar rastro.
   try {
-    if (!exists)
-      return await prismaRepository.session.create({
-        data: {
-          sessionId: sessionId,
-          creds: JSON.stringify(keyJson),
-        },
-      });
-    await prismaRepository.session.update({
+    return await prismaRepository.session.upsert({
       where: { sessionId: sessionId },
-      data: { creds: JSON.stringify(keyJson) },
+      create: { sessionId: sessionId, creds: JSON.stringify(keyJson) },
+      update: { creds: JSON.stringify(keyJson) },
     });
-  } catch {
+  } catch (error) {
+    logger.error({ action: 'auth.creds.save', sessionId, error: error?.toString() });
     return null;
   }
 }
 
+// Lanza si la base de datos falla. Quien llama tiene que distinguir "no hay sesion" (null) de
+// "no se pudo leer": tratar el fallo como sesion inexistente generaba credenciales nuevas que
+// sobrescribian las guardadas, y el numero quedaba deslogueado pidiendo QR.
 export async function getAuthKey(sessionId: string): Promise<any> {
-  try {
-    const register = await keyExists(sessionId);
-    if (!register) return null;
-    const auth = await prismaRepository.session.findUnique({ where: { sessionId: sessionId } });
-    return JSON.parse(auth?.creds);
-  } catch {
-    return null;
-  }
+  const auth = await prismaRepository.session.findUnique({ where: { sessionId: sessionId } });
+  if (!auth?.creds) return null;
+  return JSON.parse(auth.creds);
 }
 
 async function deleteAuthKey(sessionId: string): Promise<any> {
@@ -73,8 +69,6 @@ async function fileExists(file: string): Promise<any> {
     return;
   }
 }
-
-const logger = new Logger('useMultiFileAuthStatePrisma');
 
 export default async function useMultiFileAuthStatePrisma(
   sessionId: string,
@@ -166,7 +160,10 @@ export default async function useMultiFileAuthStatePrisma(
     await deleteAuthKey(sessionId);
   }
 
-  let creds = await readData('creds');
+  // Sin try/catch a proposito: si la lectura falla, la conexion aborta y se reintenta despues.
+  // Generar credenciales nuevas aqui las persistiria encima de la sesion buena.
+  const storedCreds = await getAuthKey(sessionId);
+  let creds = storedCreds ? JSON.parse(storedCreds, BufferJSON.reviver) : null;
   if (!creds) {
     creds = initAuthCreds();
     await writeData(creds, 'creds');
