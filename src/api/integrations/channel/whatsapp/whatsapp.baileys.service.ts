@@ -262,6 +262,11 @@ export class BaileysStartupService extends ChannelStartupService {
   // dispositivo real (o un contenedor duplicado) disputa la sesion.
   private replacedAt: number[] = [];
   private static readonly RECONNECT_DELAY_MS = 3000;
+  // Reintentos cuando la reconexion falla antes de abrir el socket (p. ej. la base de datos no
+  // responde al leer las credenciales). Sin ellos la instancia quedaba cerrada hasta un `init`.
+  private static readonly RECONNECT_RETRY_BASE_MS = 5_000;
+  private static readonly RECONNECT_RETRY_MAX_MS = 120_000;
+  private static readonly RECONNECT_MAX_ATTEMPTS = 10;
   private static readonly REPLACED_WINDOW_MS = 60_000;
   private static readonly REPLACED_MAX_IN_WINDOW = 3;
 
@@ -488,7 +493,7 @@ export class BaileysStartupService extends ChannelStartupService {
           return;
         }
 
-        await this.connectToWhatsapp(this.phoneNumber);
+        await this.reconnectWithRetry(sourceClient);
       } else {
         this.sendDataWebhook(Events.STATUS_INSTANCE, {
           instance: this.instance.name,
@@ -817,6 +822,32 @@ export class BaileysStartupService extends ChannelStartupService {
     this.phoneNumber = number;
 
     return this.client;
+  }
+
+  private async reconnectWithRetry(sourceClient: WASocket): Promise<void> {
+    for (let attempt = 1; attempt <= BaileysStartupService.RECONNECT_MAX_ATTEMPTS; attempt++) {
+      try {
+        await this.connectToWhatsapp(this.phoneNumber);
+        return;
+      } catch (error) {
+        const wait = Math.min(
+          BaileysStartupService.RECONNECT_RETRY_BASE_MS * 2 ** (attempt - 1),
+          BaileysStartupService.RECONNECT_RETRY_MAX_MS,
+        );
+        this.logger.error(
+          `Instance ${this.instance.name}: reconnection attempt ${attempt} failed (${error?.toString()}), ` +
+            `retrying in ${wait / 1000}s`,
+        );
+        await delay(wait);
+
+        // Otra ruta (init, restart, logout) ya actuo sobre la instancia mientras esperabamos.
+        if (this.client !== sourceClient || this.endSession) return;
+      }
+    }
+
+    this.logger.error(
+      `Instance ${this.instance.name}: giving up after ${BaileysStartupService.RECONNECT_MAX_ATTEMPTS} reconnection attempts`,
+    );
   }
 
   public async connectToWhatsapp(number?: string): Promise<WASocket> {
