@@ -283,6 +283,7 @@ export class BaileysStartupService extends ChannelStartupService {
   }
 
   public async logoutInstance() {
+    this.qrRequested = false;
     this.messageProcessor.onDestroy();
     await this.client?.logout('Log out instance: ' + this.instanceName);
 
@@ -340,6 +341,19 @@ export class BaileysStartupService extends ChannelStartupService {
     return this.instance.profilePictureUrl;
   }
 
+  // Solo se generan QR cuando alguien los pide (endpoint connect, crear instancia con qrcode,
+  // comando `init` de Chatwoot). Sin esto, una instancia sin sesion valida que arranca o
+  // reconecta sola emitia QR en bucle hasta QRCODE_LIMIT y los publicaba todos en Chatwoot.
+  private qrRequested = false;
+
+  // Idempotente mientras la peticion siga viva: el panel refresca el QR cada pocos segundos
+  // llamando a connect y no debe reiniciar el contador, o el limite nunca se alcanzaria.
+  public requestQrCode() {
+    if (this.qrRequested) return;
+    this.qrRequested = true;
+    this.instance.qrcode = { count: 0 };
+  }
+
   public get qrCode(): wa.QrCode {
     return {
       pairingCode: this.instance.qrcode?.pairingCode,
@@ -356,7 +370,19 @@ export class BaileysStartupService extends ChannelStartupService {
     sourceClient: WASocket = this.client,
   ) {
     if (qr) {
-      if (this.instance.qrcode.count === this.configService.get<QrCode>('QRCODE').LIMIT) {
+      if (!this.qrRequested) {
+        // WhatsApp pide emparejar (no hay sesion valida) pero nadie solicito el QR: arranque o
+        // reconexion automatica. Se cierra la instancia sin publicar QR; el panel ofrece el boton.
+        this.logger.warn(
+          `Instance ${this.instance.name}: session needs a new QR code but none was requested, closing until someone connects it`,
+        );
+        this.endSession = true;
+        return this.eventEmitter.emit('no.connection', this.instance.name);
+      }
+
+      if (this.instance.qrcode.count >= this.configService.get<QrCode>('QRCODE').LIMIT) {
+        this.qrRequested = false;
+
         this.sendDataWebhook(Events.QRCODE_UPDATED, {
           message: 'QR code limit reached, please login again',
           statusCode: DisconnectReason.badSession,
@@ -530,6 +556,7 @@ export class BaileysStartupService extends ChannelStartupService {
     }
 
     if (connection === 'open') {
+      this.qrRequested = false;
       this.instance.wuid = this.client.user.id.replace(/:\d+/, '');
       try {
         const profilePic = await this.profilePicture(this.instance.wuid);

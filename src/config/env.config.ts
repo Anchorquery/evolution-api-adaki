@@ -801,7 +801,7 @@ export class ConfigService {
         NAME: process.env?.CONFIG_SESSION_PHONE_NAME || 'Chrome',
       },
       QRCODE: {
-        LIMIT: Number.parseInt(process.env.QRCODE_LIMIT) || 30,
+        LIMIT: Number.parseInt(process.env.QRCODE_LIMIT) || 5,
         COLOR: process.env.QRCODE_COLOR || '#198754',
       },
       TYPEBOT: {
