@@ -63,7 +63,9 @@ jobs:
           done
 
       - name: Start the API
-        # CORS_ORIGIN is deliberately not "*": the probe sends no Origin header,
+        # Default "public" schema, as in production: a fork migration names
+        # public."Chatwoot" explicitly. CORS_ORIGIN is deliberately not "*": the
+        # probe sends no Origin header,
         # so /health must not depend on the CORS setting.
         run: |
           docker run -d --name api --network smoke \
@@ -71,7 +73,7 @@ jobs:
             -e AUTHENTICATION_API_KEY=smoke-test-key \
             -e CORS_ORIGIN=https://example.invalid \
             -e DATABASE_PROVIDER=postgresql \
-            -e DATABASE_CONNECTION_URI='postgresql://evolution:evolution@postgres:5432/evolution?schema=evolution_api' \
+            -e DATABASE_CONNECTION_URI='postgresql://evolution:evolution@postgres:5432/evolution' \
             -e DATABASE_CONNECTION_CLIENT_NAME=smoke \
             -e CACHE_REDIS_ENABLED=true \
             -e CACHE_REDIS_URI=redis://redis:6379/6 \
