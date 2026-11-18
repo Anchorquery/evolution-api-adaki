@@ -15,9 +15,7 @@ class Postgres {
     } else {
       this.pool = new Pool({
         connectionString,
-        ssl: {
-          rejectUnauthorized: false,
-        },
+        ssl: this.sslOptions(connectionString),
       });
 
       this.pool.on('error', () => {
@@ -35,6 +33,26 @@ class Postgres {
 
       return this.pool;
     }
+  }
+
+  // Antes se forzaba SSL siempre, y el Postgres de Chatwoot (contenedor en la
+  // red interna) no lo acepta: cada consulta fallaba con "The server does not
+  // support SSL connections". Ahora decide la URI: sin sslmode (o
+  // sslmode=disable) no hay SSL; con cualquier otro sslmode se cifra sin
+  // verificar el certificado, como hacía antes.
+  private sslOptions(connectionString: string) {
+    let sslmode: string | null = null;
+    try {
+      sslmode = new URL(connectionString).searchParams.get('sslmode');
+    } catch {
+      sslmode = null;
+    }
+
+    if (!sslmode || sslmode === 'disable') {
+      return false;
+    }
+
+    return { rejectUnauthorized: false };
   }
 
   getChatwootConnection() {
