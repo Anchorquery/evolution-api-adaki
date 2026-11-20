@@ -4674,19 +4674,30 @@ export class BaileysStartupService extends ChannelStartupService {
     }
   }
 
+  // La foto de cada grupo es un IQ a WhatsApp de hasta 60s. Pedirlas en serie
+  // hacia que una cuenta con muchos grupos tardara minutos en listar y el
+  // cliente cortara antes (en Chatwoot solo quedaban los canales). Ahora van en
+  // paralelo, con el tope corto de profilePictureBounded y un presupuesto total:
+  // pasado el presupuesto, los grupos que faltan salen sin foto. Con
+  // getPictures=false no se piden.
+  private readonly GROUP_PICTURE_CONCURRENCY = 10;
+  private readonly GROUP_PICTURE_BUDGET_MS = 15000;
+
   public async fetchAllGroups(getParticipants: GetParticipant) {
     const fetch = Object.values(await this?.client?.groupFetchAllParticipating());
+    const pictures =
+      getParticipants.getPictures == 'false'
+        ? new Map<string, string | null>()
+        : await this.groupPictures(fetch.map((group) => group.id));
 
-    let groups = [];
+    const groups = [];
     for (const group of fetch) {
-      const picture = await this.profilePicture(group.id);
-
       const result = {
         id: group.id,
         subject: group.subject,
         subjectOwner: group.subjectOwner,
         subjectTime: group.subjectTime,
-        pictureUrl: picture?.profilePictureUrl,
+        pictureUrl: pictures.get(group.id) ?? null,
         size: group.participants.length,
         creation: group.creation,
         owner: group.owner,
@@ -4703,10 +4714,27 @@ export class BaileysStartupService extends ChannelStartupService {
         result['participants'] = group.participants;
       }
 
-      groups = [...groups, result];
+      groups.push(result);
     }
 
     return groups;
+  }
+
+  private async groupPictures(ids: string[]) {
+    const pictures = new Map<string, string | null>();
+    const deadline = Date.now() + this.GROUP_PICTURE_BUDGET_MS;
+    let next = 0;
+
+    const worker = async () => {
+      while (next < ids.length && Date.now() < deadline) {
+        const id = ids[next++];
+        const picture = await this.profilePictureBounded(id).catch(() => null);
+        pictures.set(id, picture?.profilePictureUrl ?? null);
+      }
+    };
+
+    await Promise.all(Array.from({ length: Math.min(this.GROUP_PICTURE_CONCURRENCY, ids.length) }, worker));
+    return pictures;
   }
 
   // Límite de metadatos a consultar por request: cada uno es un round-trip a
