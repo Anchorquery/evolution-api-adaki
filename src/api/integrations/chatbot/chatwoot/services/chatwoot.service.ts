@@ -1748,8 +1748,20 @@ export class ChatwootService {
 
       // Un mensaje nuevo que no se pudo enviar responde con error (ver el router):
       // con 200 Chatwoot lo daba por enviado y una campaña lo contaba como entregado.
-      return { message: 'bot', failed: body?.event === 'message_created' };
+      // La razón viaja en el cuerpo: sin ella Chatwoot solo veía "500 Internal
+      // Server Error" y una campaña reintentaba sin fin números que no tienen WhatsApp.
+      return { message: 'bot', failed: body?.event === 'message_created', error: this.describeSendError(error) };
     }
+  }
+
+  private describeSendError(error: any): string {
+    if (error?.status === 400 && error?.message?.[0]?.exists === false) {
+      return 'Number not on WhatsApp';
+    }
+
+    const reason = error?.message ?? error?.error ?? error;
+    const text = typeof reason === 'string' ? reason : JSON.stringify(reason);
+    return (text || 'Unknown error').slice(0, 300);
   }
 
   private async updateChatwootMessageId(
