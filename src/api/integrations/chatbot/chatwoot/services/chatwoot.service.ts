@@ -1322,6 +1322,17 @@ export class ChatwootService {
     }
   }
 
+  // Misma deducción por extensión que sendAttachment. Sin extensión no se sabe
+  // sin descargar: se trata como no audio.
+  private isAudioUrl(media: string) {
+    try {
+      const ext = path.parse(decodeURIComponent(media)).ext;
+      return String(mimeTypes.lookup(ext) || '').startsWith('audio/');
+    } catch {
+      return false;
+    }
+  }
+
   public async sendAttachment(waInstance: any, number: string, media: any, caption?: string, options?: Options) {
     try {
       const parsedMedia = path.parse(decodeURIComponent(media));
@@ -1607,10 +1618,17 @@ export class ChatwootService {
 
         for (const message of body.conversation.messages) {
           if (message.attachments && message.attachments.length > 0) {
+            // El texto va una sola vez, de pie del primer adjunto que lo admite
+            // (un audio no lleva pie). Antes iba en todos: con tres imágenes el
+            // destinatario leía el mismo texto tres veces.
+            let captionPending = true;
             for (const attachment of message.attachments) {
               if (!messageReceived) {
                 formatText = null;
               }
+
+              const takesCaption = captionPending && !this.isAudioUrl(attachment.data_url);
+              if (takesCaption) captionPending = false;
 
               const options: Options = {
                 quoted: await this.getQuotedMessage(body, instance),
@@ -1620,7 +1638,7 @@ export class ChatwootService {
                 waInstance,
                 chatId,
                 attachment.data_url,
-                formatText,
+                takesCaption ? formatText : null,
                 options,
               );
               if (!messageSent) {
